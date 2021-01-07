@@ -245,9 +245,9 @@ PG_SYSROOT = @PG_SYSROOT@
 override CPPFLAGS := $(ICU_CFLAGS) $(CPPFLAGS)
 
 ifdef PGXS
-override CPPFLAGS := -I$(includedir_server) -I$(includedir_internal) $(CPPFLAGS)
+override CPPFLAGS := -I$(includedir_server) -I$(includedir_internal) -I$(top_srcdir)/src/interfaces/libpq $(CPPFLAGS) 
 else # not PGXS
-override CPPFLAGS := -I$(top_srcdir)/src/include $(CPPFLAGS)
+override CPPFLAGS := -I$(top_srcdir)/src/include -I$(top_srcdir)/src/interfaces/libpq $(CPPFLAGS)
 ifdef VPATH
 override CPPFLAGS := -I$(top_builddir)/src/include $(CPPFLAGS)
 endif
@@ -721,7 +721,7 @@ LIBOBJS = @LIBOBJS@
 # files needed for the chosen CRC-32C implementation
 PG_CRC32C_OBJS = @PG_CRC32C_OBJS@
 
-LIBS := -lpgcommon -lpgport $(LIBS)
+LIBS := -lpgcommon -lpgport -lpq $(LIBS)
 
 # to make ws2_32.lib the last library
 ifeq ($(PORTNAME),win32)
