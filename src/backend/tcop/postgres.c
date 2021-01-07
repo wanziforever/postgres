@@ -82,6 +82,9 @@
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
 
+#include "hgdispatch/hgdispatch.h"
+#include "hgdispatch/hgdispatch_utility.h"
+
 /* ----------------
  *		global variables
  * ----------------
@@ -1095,7 +1098,7 @@ exec_simple_query(const char *query_string)
                    if (!dispatch(query_string))
                        ereport(LOG, (errmsg("fail to dispatch query %s", query_string)));
                    continue;
-               )                                                                                                                          
+               }
 
 		BeginCommand(commandTag, dest);
 
