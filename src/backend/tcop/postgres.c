@@ -1086,6 +1086,16 @@ exec_simple_query(const char *query_string)
 
 		set_ps_display(GetCommandTagName(commandTag));
 
+               set_ps_display(GetCommandTagName(commandTag));
+
+	       // highgo dispatch work
+	       if (requireDispatch(commandTag, parsetree)) {
+	           ereport(LOG, (errmsg("going to do dispatch")));
+                   if (!dispatch(query_string))
+                       ereport(LOG, (errmsg("fail to dispatch query %s", query_string)));
+                   continue;
+               )                                                                                                                          
+
 		BeginCommand(commandTag, dest);
 
 		/*

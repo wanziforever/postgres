@@ -308,9 +308,9 @@ with_gnu_ld = @with_gnu_ld@
 # These initial assignments must be "=" type, and elsewhere we must only do
 # "LDFLAGS += something" or "LDFLAGS_INTERNAL += something".
 ifdef PGXS
-  LDFLAGS_INTERNAL = -L$(libdir)
+  LDFLAGS_INTERNAL = -L$(libdir) -L$(top_builddir)/src/interfaces/libpq
 else
-  LDFLAGS_INTERNAL = -L$(top_builddir)/src/port -L$(top_builddir)/src/common
+  LDFLAGS_INTERNAL = -L$(top_builddir)/src/port -L$(top_builddir)/src/common -L$(top_builddir)/src/interfaces/libpq
 endif
 LDFLAGS = $(LDFLAGS_INTERNAL) @LDFLAGS@
 
