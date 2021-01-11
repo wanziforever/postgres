@@ -89,6 +89,15 @@ hgsecure_raw_write(Port *port, const void *ptr, size_t len)
 
 	n = send(port->sock, ptr, len, flags);
 
+	if (n < 0)
+	{
+		result_errno = SOCK_ERRNO;
+		ereport(LOG,
+				(errmsg("fail to send mesage due to %s",
+						SOCK_STRERROR(result_errno, sebuf, sizeof(sebuf)))));
+	}
+
+
 	return n;
 }
 
@@ -501,15 +510,15 @@ retry3:
 
 	switch (hgReadReady(conn))
 	{
-		case 0:
-			/* definitely no data available */
-			return 0;
-		case 1:
-			/* ready for read */
-			break;
-		default:
-			/* we override pqReadReady's message with something more useful */
-			goto definitelyEOF;
+	case 0:
+		/* definitely no data available */
+		return 0;
+	case 1:
+		/* ready for read */
+		break;
+	default:
+		/* we override pqReadReady's message with something more useful */
+		goto definitelyEOF;
 	}
 
 	/*
@@ -631,52 +640,58 @@ hgSendSome(PGconn *conn, int len)
 	while (len > 0)
 	{
 		int			sent;
-
-		sent = hgsecure_raw_write(conn, ptr, len);
+		int result_errno = 0;
+		char		sebuf[PG_STRERROR_R_BUFLEN];
+		
+		sent = send(conn->sock, ptr, len, 0);
 
 		if (sent < 0)
 		{
+			result_errno = SOCK_ERRNO;
+			ereport(LOG,
+				(errmsg("fail to send mesage due to %s",
+						SOCK_STRERROR(result_errno, sebuf, sizeof(sebuf)))));
 			/* Anything except EAGAIN/EWOULDBLOCK/EINTR is trouble */
 			switch (SOCK_ERRNO)
 			{
 #ifdef EAGAIN
-				case EAGAIN:
-					break;
+			case EAGAIN:
+				break;
 #endif
 #if defined(EWOULDBLOCK) && (!defined(EAGAIN) || (EWOULDBLOCK != EAGAIN))
-				case EWOULDBLOCK:
-					break;
+			case EWOULDBLOCK:
+				break;
 #endif
-				case EINTR:
-					continue;
+			case EINTR:
+				continue;
 
-				default:
-					/* pqsecure_write set the error message for us */
-					conn->write_failed = true;
+			default:
+				/* pqsecure_write set the error message for us */
+				conn->write_failed = true;
 
-					/*
-					 * Transfer error message to conn->write_err_msg, if
-					 * possible (strdup failure is OK, we'll cope later).
-					 *
-					 * Note: this assumes that pqsecure_write and its children
-					 * will overwrite not append to conn->errorMessage.  If
-					 * that's ever changed, we could remember the length of
-					 * conn->errorMessage at entry to this routine, and then
-					 * save and delete just what was appended.
-					 */
-					conn->write_err_msg = strdup(conn->errorMessage.data);
-					resetPQExpBuffer(&conn->errorMessage);
+				/*
+				 * Transfer error message to conn->write_err_msg, if
+				 * possible (strdup failure is OK, we'll cope later).
+				 *
+				 * Note: this assumes that pqsecure_write and its children
+				 * will overwrite not append to conn->errorMessage.  If
+				 * that's ever changed, we could remember the length of
+				 * conn->errorMessage at entry to this routine, and then
+				 * save and delete just what was appended.
+				 */
+				conn->write_err_msg = strdup(conn->errorMessage.data);
+				resetPQExpBuffer(&conn->errorMessage);
 
-					/* Discard queued data; no chance it'll ever be sent */
-					conn->outCount = 0;
+				/* Discard queued data; no chance it'll ever be sent */
+				conn->outCount = 0;
 
-					/* Absorb input data if any, and detect socket closure */
-					if (conn->sock != PGINVALID_SOCKET)
-					{
-						if (hgReadData(conn) < 0)
-							return -1;
-					}
-					return 0;
+				/* Absorb input data if any, and detect socket closure */
+				if (conn->sock != PGINVALID_SOCKET)
+				{
+					if (hgReadData(conn) < 0)
+						return -1;
+				}
+				return 0;
 			}
 		}
 		else
@@ -1042,4 +1057,14 @@ uint32 pg_ntoh32(uint32 x) {
 		((x << 8) & 0x00ff0000) |
 		((x >> 8) & 0x0000ff00) |
 		((x >> 24) & 0x000000ff);
+}
+
+uint32 pq_hton32(uint32 x) {
+	{
+		return
+			((x << 24) & 0xff000000) |
+			((x << 8) & 0x00ff0000) |
+			((x >> 8) & 0x0000ff00) |
+			((x >> 24) & 0x000000ff);
+	}
 }

@@ -81,8 +81,10 @@
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
 
+/* for highgo DNL dispatch feature */
 #include "hgdispatch/hgdispatch.h"
 #include "hgdispatch/hgdispatch_utility.h"
+extern List *prepare_parsetreelist_for_dispatch;
 
 /* ----------------
  *		global variables
@@ -1091,13 +1093,14 @@ exec_simple_query(const char *query_string)
 
                set_ps_display(GetCommandTagName(commandTag));
 
-	       // highgo dispatch work
-	       if (requireDispatch(commandTag, parsetree)) {
-	           ereport(LOG, (errmsg("going to do dispatch")));
-                   if (!dispatch(query_string))
-                       ereport(LOG, (errmsg("fail to dispatch query %s", query_string)));
-                   continue;
-               }
+			   // highgo dispatch work
+			   if (requireDispatch(commandTag, parsetree)) {
+				   ereport(LOG, (errmsg("going to do dispatch")));
+				   DispatchState *dstate = dispatch(query_string);
+				   if (!handleResultAndForward(dstate))
+					   ereport(LOG, (errmsg("fail to dispatch query %s", query_string)));
+				   continue;
+			   }
 
 		BeginCommand(commandTag, dest);
 
@@ -1363,6 +1366,7 @@ exec_parse_message(const char *query_string,	/* string to execute */
 				   const char *stmt_name,	/* name for prepared stmt */
 				   Oid *paramTypes, /* parameter types */
 				   int numParams)	/* number of parameters */
+	
 {
 	MemoryContext unnamed_stmt_context = NULL;
 	MemoryContext oldcontext;
@@ -1434,7 +1438,20 @@ exec_parse_message(const char *query_string,	/* string to execute */
 	 * Do basic parsing of the query or queries (this should be safe even if
 	 * we are in aborted transaction state!)
 	 */
-	parsetree_list = pg_parse_query(query_string);
+
+	/* if DNL dispatch feature enabled, the query string will be parsed firstly
+	   when doing dispatch check, and to avoid the duplicated parse work, the
+	   former parsetree lsit will be stored to a global variable, so just check
+	   it before doing parse again */
+	if (prepare_parsetreelist_for_dispatch == NULL) {
+		parsetree_list = pg_parse_query(query_string);
+	} else {
+		parsetree_list = prepare_parsetreelist_for_dispatch;
+		/* prepare_parsetreelist_for_dispatch only used
+		   for avoid double parse work, after doing parse
+		   just set it to NULL */
+		prepare_parsetreelist_for_dispatch = NULL; 
+	}
 
 	/*
 	 * We only allow a single user statement in a prepared statement. This is
@@ -1734,6 +1751,10 @@ exec_bind_message(StringInfo input_message)
 	 * Create the portal.  Allow silent replacement of an existing portal only
 	 * if the unnamed portal is specified.
 	 */
+
+	ereport(LOG,
+			(errmsg("going to create portal for portal name %s", portal_name)));
+	
 	if (portal_name[0] == '\0')
 		portal = CreatePortal(portal_name, true, true);
 	else
@@ -4355,6 +4376,34 @@ PostgresMain(int argc, char *argv[],
 					/* Set statement_timestamp() */
 					SetCurrentStatementStartTimestamp();
 
+					ereport(LOG,
+							(errmsg("find the parse extend query message")));
+
+					if (RecoveryInProgress())
+					{
+						int oldcur = input_message.cursor;
+						stmt_name = pq_getmsgstring(&input_message);
+						query_string = pq_getmsgstring(&input_message);
+						/* should be called here before exec_parse_message
+						   although it will be called again if not dispatch
+						   this call here is definitly for
+						   get_password->get_role_password->...->ResourceOnwerEnlargeCatCacheResf
+						   it required the CurrentResourceOwner be set by start transaction routine
+						*/
+						start_xact_command();
+
+						dropUnnamedPrepareDispatch();
+						
+						if (requireExtendParseDispatch(query_string)) {
+							storePrepareQueriesPlanDispatched(stmt_name, true);
+							DispatchState *dstate = extendDispatch('P', &input_message);
+							handleResultAndForward(dstate);
+							break;
+						}
+						input_message.cursor = oldcur;
+					}
+					
+
 					stmt_name = pq_getmsgstring(&input_message);
 					query_string = pq_getmsgstring(&input_message);
 					numParams = pq_getmsgint(&input_message, 2);
@@ -4377,6 +4426,28 @@ PostgresMain(int argc, char *argv[],
 				/* Set statement_timestamp() */
 				SetCurrentStatementStartTimestamp();
 
+				if (RecoveryInProgress())
+				{
+					int oldcur = input_message.cursor;
+					char *stmt_name;
+					char *portal_name;
+					portal_name = pq_getmsgstring(&input_message);
+					stmt_name = pq_getmsgstring(&input_message);
+					ereport(LOG,
+							(errmsg("backup role get bind message as stmt name %s, portal name=%s", stmt_name, portal_name)));
+					if (requireExtendBindDispatch(stmt_name)) {
+						storePrepareQueriesPortalDispatched(portal_name, true);
+						ereport(LOG,
+								(errmsg("going to dispatch bind message")));
+						DispatchState *dstate = extendDispatch('B', &input_message);
+						handleResultAndForward(dstate);
+						break;
+					}
+					/* restore the cursor for workaround */
+					input_message.cursor = oldcur;
+				}
+				
+
 				/*
 				 * this message is complex enough that it seems best to put
 				 * the field extraction out-of-line
@@ -4393,6 +4464,22 @@ PostgresMain(int argc, char *argv[],
 
 					/* Set statement_timestamp() */
 					SetCurrentStatementStartTimestamp();
+
+					if (RecoveryInProgress())
+					{
+						int oldcur = input_message.cursor;
+						char *portal_name;
+						portal_name = pq_getmsgstring(&input_message);
+						if (requireExtendExecuteDispatch(portal_name)) {
+							DispatchState *dstate = extendDispatch('E', &input_message);
+							handleResultAndForward(dstate);
+							break;
+						}
+						ereport(LOG,
+								(errmsg("---------------------------execution-----------------")));
+						/* restore the cursor for workaround */
+						input_message.cursor = oldcur;
+					}
 
 					portal_name = pq_getmsgstring(&input_message);
 					max_rows = pq_getmsgint(&input_message, 4);
