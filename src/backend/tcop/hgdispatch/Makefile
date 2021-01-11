@@ -18,6 +18,8 @@ OBJS = \
 	hgdispatch_connection.o \
 	hgdispatch_utility.o \
 	hgdispatch.o \
-	pqwrapper.o
+	pqwrapper.o \
+	extendhgdispatch.o 
+
 
 include $(top_srcdir)/src/backend/common.mk

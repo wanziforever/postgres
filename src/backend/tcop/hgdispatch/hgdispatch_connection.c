@@ -8,9 +8,9 @@
 extern struct Port *MyProcPort;
 
 static PGconn *Dispatch_Connection = NULL;
-PGconn* createDispatchConnection();
+extern bool getPrimaryHostInfo(char *host, char* port);
 
-PGconn* createDispatchConnection() {
+PGconn* createDispatchConnection(void) {
 	ereport(LOG, (errmsg("create dispatch connection enter")));
 	#define PARAMS_ARRAY_SIZE	8
 
@@ -57,7 +57,7 @@ PGconn* createDispatchConnection() {
 }
 
 PGconn* aaabb = NULL;
-PGconn* getCurrentDispatchConnection() {
+PGconn* getCurrentDispatchConnection(void) {
 	//actually need the top level context
 	if (Dispatch_Connection == NULL) {
 		Dispatch_Connection = createDispatchConnection();

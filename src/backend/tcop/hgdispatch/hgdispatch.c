@@ -12,28 +12,30 @@
 	 (id) == 'E' || (id) == 'N' || (id) == 'A')
 
 
-void dispatchInputParseAndSend(PGconn *conn);
-
-
-DispatchState* createDispatchState() {
+DispatchState* createDispatchState(void) {
 	DispatchState *st = palloc(sizeof(DispatchState));
-
 	PGconn *c = getCurrentDispatchConnection();
 	st->conn = c;
 	return st;
 }
 
-bool dispatch(const char* query_string) {
+
+DispatchState* dispatch(const char* query_string) {
+	// need to pay attention to free the DispatchState instance
 	ereport(LOG, (errmsg("dispatch enter")));
 	DispatchState *dstate = createDispatchState();
 	ereport(LOG, (errmsg("going to do pgexec")));
 	
-	PGresult *res = PQsendQuery(dstate->conn, query_string);
+	int n = PQsendQuery(dstate->conn, query_string);
 
 	ereport(LOG, (errmsg("after pqexec")));
 	// need to delete the state instance??
+	return dstate;
+}
+
+bool handleResultAndForward(DispatchState *dstate) {
 	PGconn *conn = dstate->conn;
-	
+
 	dispatchInputParseAndSend(dstate->conn);
 	
 	while (conn->asyncStatus == PGASYNC_BUSY) {
