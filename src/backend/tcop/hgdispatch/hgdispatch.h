@@ -13,6 +13,7 @@ typedef struct {
 } DispatchState;
 
 typedef struct {
+	char extendName[NAMEDATALEN]; // both for portal name and stmt name
 	bool isdispatched;
 } PrepareQueryDispatched;
 

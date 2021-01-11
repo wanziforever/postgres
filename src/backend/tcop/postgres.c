@@ -4384,6 +4384,8 @@ PostgresMain(int argc, char *argv[],
 						int oldcur = input_message.cursor;
 						stmt_name = pq_getmsgstring(&input_message);
 						query_string = pq_getmsgstring(&input_message);
+						ereport(LOG,
+								(errmsg("%s", query_string)));
 						/* should be called here before exec_parse_message
 						   although it will be called again if not dispatch
 						   this call here is definitly for
@@ -4443,6 +4445,7 @@ PostgresMain(int argc, char *argv[],
 						handleResultAndForward(dstate);
 						break;
 					}
+					storePrepareQueriesPortalDispatched(portal_name, false);
 					/* restore the cursor for workaround */
 					input_message.cursor = oldcur;
 				}
