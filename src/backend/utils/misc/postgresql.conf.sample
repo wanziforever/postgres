@@ -777,3 +777,8 @@
 #------------------------------------------------------------------------------
 
 # Add settings for extensions here
+
+#HGDB_CLUSTER_SQL_FORWARD_WRITE_FUNC_LIST            = 'nextval,setval,lastval,currval' # the function names which should forward to master. comma-separated list.
+#HGDB_CLUSTER_SQL_FORWARD_READ_FUNC_LIST             = '' # If the function is not forward, configure the talbe name it accesses.
+                                                           # comma-separated list. e.g. func_name1(table_name1,table_name2),func_name2(table_name3)
+

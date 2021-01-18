@@ -212,6 +212,11 @@ DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
 				(errmsg("fail to send extended dispatch message")));
 	}
 
+	if (msgtype == 'P')
+	{
+		set_dml_read_func_oids_num();
+	}
+
 	ereport(LOG, (errmsg("after pqexec")));
 	// need to delete the state instance??
 	return dstate;
