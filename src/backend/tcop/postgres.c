@@ -1091,16 +1091,21 @@ exec_simple_query(const char *query_string)
 
 		set_ps_display(GetCommandTagName(commandTag));
 
-               set_ps_display(GetCommandTagName(commandTag));
+		if (RecoveryInProgress()) {
+			// highgo dispatch work
+			DMLQueryStragegy strategy = requireDispatch(commandTag, parsetree);
+			if (strategy == DISPATCH_PRIMARY || strategy == DISPATCH_PRIMARY_AND_STANDBY) {
+				ereport(LOG, (errmsg("going to do dispatch")));
+				DispatchState *dstate = dispatch(query_string);
+				dstate->stragegy = strategy;
+				if (!handleResultAndForward(dstate))
+					ereport(LOG, (errmsg("fail to dispatch query %s", query_string)));
+			}
 
-			   // highgo dispatch work
-			   if (requireDispatch(commandTag, parsetree)) {
-				   ereport(LOG, (errmsg("going to do dispatch")));
-				   DispatchState *dstate = dispatch(query_string);
-				   if (!handleResultAndForward(dstate))
-					   ereport(LOG, (errmsg("fail to dispatch query %s", query_string)));
-				   continue;
-			   }
+			if (strategy == DISPATCH_PRIMARY)
+				continue;
+
+		}
 
 		BeginCommand(commandTag, dest);
 
@@ -4396,7 +4401,7 @@ PostgresMain(int argc, char *argv[],
 
 						dropUnnamedPrepareDispatch();
 						
-						if (requireExtendParseDispatch(query_string)) {
+						if (requireExtendParseDispatch(query_string) == DISPATCH_PRIMARY) {
 							storePrepareQueriesPlanDispatched(stmt_name, true);
 							DispatchState *dstate = extendDispatch('P', &input_message);
 							handleResultAndForward(dstate);
@@ -4437,7 +4442,7 @@ PostgresMain(int argc, char *argv[],
 					stmt_name = pq_getmsgstring(&input_message);
 					ereport(LOG,
 							(errmsg("backup role get bind message as stmt name %s, portal name=%s", stmt_name, portal_name)));
-					if (requireExtendBindDispatch(stmt_name)) {
+					if (requireExtendBindDispatch(stmt_name) == DISPATCH_PRIMARY) {
 						storePrepareQueriesPortalDispatched(portal_name, true);
 						ereport(LOG,
 								(errmsg("going to dispatch bind message")));
@@ -4473,7 +4478,7 @@ PostgresMain(int argc, char *argv[],
 						int oldcur = input_message.cursor;
 						char *portal_name;
 						portal_name = pq_getmsgstring(&input_message);
-						if (requireExtendExecuteDispatch(portal_name)) {
+						if (requireExtendExecuteDispatch(portal_name) == DISPATCH_PRIMARY) {
 							DispatchState *dstate = extendDispatch('E', &input_message);
 							handleResultAndForward(dstate);
 							break;

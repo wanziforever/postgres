@@ -12,19 +12,162 @@ extern List *prepare_parsetreelist_for_dispatch;
 extern bool unamed_prepare_dispatched;
 List * pg_parse_query(const char *query_string);
 
-bool requireDispatch(CommandTag cmdTag, RawStmt* parsetree) {
-	// also need to consider the feature lock
-	if (!RecoveryInProgress())
+// return true for update semantics in select
+bool further_check_select_semantics(Node *node) {
+	if (node == NULL) {
 		return false;
+	}
+	//ereport(LOG, (errmsg("FWD: Process the node %d for select", nodeTag(node))));
 
-	if (cmdTag == CMDTAG_SELECT)
-		return false;
+	switch (nodeTag(node))
+	{
+	case T_IntoClause:
+	case T_LockingClause:
+	case T_InsertStmt:
+	case T_DeleteStmt:
+	case T_UpdateStmt:
+		return true;
+	case T_SelectStmt:
+	{
+		SelectStmt *stmt = (SelectStmt *) node;
 
-	return true;
+		if (further_check_select_semantics((Node *)stmt->intoClause))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->targetList))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->fromClause))
+			return true;
+		if (further_check_select_semantics(stmt->whereClause))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->groupClause))
+			return true;
+		if (further_check_select_semantics(stmt->havingClause))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->windowClause))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->valuesLists))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->sortClause))
+			return true;
+		if (further_check_select_semantics(stmt->limitOffset))
+			return true;
+		if (further_check_select_semantics(stmt->limitCount))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->lockingClause))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->withClause))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->larg))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->rarg))
+			return true;
+	}
+	break;
+//	case T_FuncCall:
+//		if ((fwd_white_list == NULL) || (0 == *fwd_white_list))
+//		{
+//			return true;
+//		}
+//		else
+//		{
+//			char* name = strVal(llast(((FuncCall *) node)->funcname));
+//			if ((name == NULL) || (0 == *name))
+//			{
+//				return true;
+//			}
+//			ereport(DEBUG5, (errmsg("FWD: Process the Function %s in '%s'", name, fwd_white_list)));
+//			/* Get Function Name and compare with the list */
+//			return (NULL == strstr(fwd_white_list, name));
+//		}
+//
+//		break;
+	case T_OnConflictClause:
+	{
+		OnConflictClause *stmt = (OnConflictClause *) node;
+
+		if (further_check_select_semantics((Node *)stmt->infer))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->targetList))
+			return true;
+		if (further_check_select_semantics((Node *)stmt->whereClause))
+			return true;
+	}
+	break;
+	case T_ResTarget:
+	{
+		ResTarget  *rt = (ResTarget *) node;
+		/* Select Function: The SelectStmt->ListStmt->ResTarget->Function */
+
+		if (further_check_select_semantics((Node *)rt->indirection))
+			return true;
+		if (further_check_select_semantics(rt->val))
+			return true;
+	}
+	break;
+	case T_List:
+	{
+		ListCell   *temp;
+		foreach(temp, (List *) node)
+		{
+			if (further_check_select_semantics((Node *) lfirst(temp)))
+				return true;
+		}
+	}
+	break;
+	default:
+		break;
+	}
+
+	return false;
 }
 
 
-bool requireExtendParseDispatch(const char* query_string) {
+DMLQueryStragegy requireDispatch(CommandTag cmdTag, RawStmt* parsetree) {
+	// also need to consider the feature lock
+	switch (cmdTag) {
+	case CMDTAG_SELECT:
+	{
+		/* actually copy to will fail to write to standby, but please don't run copy to standby */
+		/* handle for update series cmd */
+		ereport(LOG, (errmsg("--------------requireDispatch ----------")));
+		bool update_semantics_in_select = false;;
+		update_semantics_in_select = further_check_select_semantics(parsetree->stmt);
+		if (update_semantics_in_select) {
+			return DISPATCH_PRIMARY;
+		} else {
+			return DISPATCH_STANDBY;
+		}
+		break;
+	}
+	case T_CopyStmt: 
+		return DISPATCH_STANDBY;
+		/* following for transaction tags */
+	case CMDTAG_BEGIN:
+	case CMDTAG_START_TRANSACTION:
+	case CMDTAG_COMMIT:
+	case CMDTAG_ROLLBACK:
+	case CMDTAG_SAVEPOINT:
+	case CMDTAG_RELEASE:
+	case CMDTAG_PREPARE_TRANSACTION: /* need attention */
+	case CMDTAG_COMMIT_PREPARED:
+	case CMDTAG_ROLLBACK_PREPARED:
+		/* variable set command will duplicated */
+	case CMDTAG_SET:
+	case CMDTAG_RESET:
+		return DISPATCH_PRIMARY_AND_STANDBY;
+	default:
+		return DISPATCH_PRIMARY;
+	}
+	
+	// actually still need to consider the CMDTAG_PREPARE and CMDTAG_EXECUTE
+	// and CMDTAG_SELECT_FOR_UPDATE series tags
+	// it is a little complex.
+
+	return DISPATCH_PRIMARY;
+}
+
+
+DMLQueryStragegy requireExtendParseDispatch(const char* query_string) {
 	// we do parse the query for the sql statement without wait for doing it in
 	// the exec_parse_message. it is a hard decision, becase parse, bind, execute
 	// are important part, but different handling code style, it is hard to do
@@ -56,10 +199,13 @@ bool requireExtendParseDispatch(const char* query_string) {
 	RawStmt *raw_parse_tree = linitial_node(RawStmt, parsetree_list);
 	
 	CommandTag cmdTag = CreateCommandTag(raw_parse_tree->stmt);
+
+	ereport(LOG,
+			(errmsg("the command tag for sql is %d, %d, %s", cmdTag, CMDTAG_SELECT_FOR_UPDATE, query_string)));
 	return requireDispatch(cmdTag, raw_parse_tree);
 }
 
-bool requireExtendBindDispatch(const char* stmt_name) {
+DMLQueryStragegy requireExtendBindDispatch(const char* stmt_name) {
 	if (!RecoveryInProgress())
 		return false;
 
@@ -70,7 +216,7 @@ bool requireExtendBindDispatch(const char* stmt_name) {
 	return fetchPrepareQueriesPlanDispatched(stmt_name);
 }
 
-bool requireExtendExecuteDispatch(const char* portal_name) {
+DMLQueryStragegy requireExtendExecuteDispatch(const char* portal_name) {
 	if (!RecoveryInProgress())
 		return false;
 	
@@ -151,7 +297,7 @@ bool getPrimaryHostInfo(char *host, char* port) {
 		} else if (strncmp(token, "port", 4) == 0) {
 			strncpy(port, token+5, 10);
 		}
-		ereport(LOG, (errmsg("getPrimaryHostInfo %s", token)));
+		//ereport(LOG, (errmsg("getPrimaryHostInfo %s", token)));
 		token = strtok(NULL, " ");
 	}
 

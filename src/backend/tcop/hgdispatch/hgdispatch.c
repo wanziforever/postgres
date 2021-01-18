@@ -36,7 +36,10 @@ DispatchState* dispatch(const char* query_string) {
 bool handleResultAndForward(DispatchState *dstate) {
 	PGconn *conn = dstate->conn;
 
-	dispatchInputParseAndSend(dstate->conn);
+	bool consume_message_only = false;
+	consume_message_only = dstate->stragegy == DISPATCH_PRIMARY_AND_STANDBY ? true:false;
+		
+	dispatchInputParseAndSend(dstate->conn, consume_message_only);
 	
 	while (conn->asyncStatus == PGASYNC_BUSY) {
 		int flushResult;
@@ -58,7 +61,7 @@ bool handleResultAndForward(DispatchState *dstate) {
 			return false;
 		}
 		
-		dispatchInputParseAndSend(dstate->conn);
+		dispatchInputParseAndSend(dstate->conn, consume_message_only);
 		
 	}
 
@@ -67,7 +70,7 @@ bool handleResultAndForward(DispatchState *dstate) {
 		break;
 	case PGASYNC_READY:
 		// try to get the Z command
-		dispatchInputParseAndSend(conn);
+		dispatchInputParseAndSend(conn, consume_message_only);
 		break;
 	default:
 		ereport(LOG,
@@ -85,7 +88,7 @@ void handleHgSyncloss(PGconn *conn, char id, int msgLength) {
 }
 
 
-void dispatchInputParseAndSend(PGconn *conn) {
+void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 	// only check the parameers which is usefull for dispatch private
 	ereport(LOG, (errmsg("dispatch input parse and send enter")));
 	char id;
@@ -161,7 +164,11 @@ void dispatchInputParseAndSend(PGconn *conn) {
 		}
 
 		conn->inCursor += msgLength;
-		hg_putbytes(conn->inBuffer + conn->inStart, msgLength+5);
+		
+		// ignore the Z, becasue the standby logic will send a Z still
+		if (!consume_message_only && id != 'Z') 
+			hg_putbytes(conn->inBuffer + conn->inStart, msgLength+5);
+		
 		conn->inStart = conn->inCursor;
 		
 	}
