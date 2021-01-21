@@ -2713,6 +2713,7 @@ finish_xact_command(void)
 
 		xact_started = false;
 	}
+
 }
 
 
@@ -4292,6 +4293,13 @@ PostgresMain(int argc, char *argv[],
 
 			ReadyForQuery(whereToSendOutput);
 			send_ready_for_query = false;
+
+			if (TransactionBlockStatusCode() != 'T') {
+				ereport(LOG, (errmsg("transaction complete going to try to clean up the oids if the scope is transaction")));
+				if (dispatch_check_scope == DISPATCH_TRANSACTION) {
+					cleanupDispatchDirtyOids();
+				}
+			}
 		}
 
 		/*

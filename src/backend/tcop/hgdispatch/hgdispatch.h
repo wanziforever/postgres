@@ -13,6 +13,11 @@ typedef enum DMLQueryStragegy {
 	DISPATCH_PRIMARY_AND_STANDBY
 } DMLQueryStragegy;
 
+typedef enum DispatchMode {
+	DISPATCH_SESSION,
+	DISPATCH_TRANSACTION
+} DispatchMode;
+
 typedef struct {
 	PGconn *conn;
 	DMLQueryStragegy stragegy;
@@ -44,8 +49,11 @@ void handleHgSyncloss(PGconn *conn, char id, int msgLength);
 void dropUnnamedPrepareDispatch(void);
 
 void showAllDirtyOids(void);
-int64 getHgGetCurrentLocalSeconds(void);
+uint64 getHgGetCurrentLocalSeconds(void);
+bool examineDirtyOid(Oid oidl);
 
 extern bool am_dml_dispatch;
+extern bool enable_dml_dispatch;
+extern DispatchMode dispatch_check_scope;
 
 #define MAX_DIRTY_OIDS 50

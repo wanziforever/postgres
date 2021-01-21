@@ -49,6 +49,6 @@ int getDirtyOidNum(void);
 Oid* getDirtyOids(void);
 int64* getDirtyTimestamp(void);
 void showAllDirtyOids(void);
-int64 getHgGetCurrentLocalSeconds(void);
+uint64 getHgGetCurrentLocalSeconds(void);
 
 extern bool am_dml_dispatch;

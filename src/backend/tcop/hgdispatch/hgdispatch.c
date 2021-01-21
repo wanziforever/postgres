@@ -4,6 +4,10 @@
 
 //static DispatchPipline *Dispatch_Pipline = NULL;
 
+bool enable_dml_dispatch = true;
+//DispatchMode dispatch_check_scope = DISPATCH_SESSION;
+DispatchMode dispatch_check_scope = DISPATCH_TRANSACTION;
+
 #define BUFFER_LEN 4096
 #define offsetof(type, field) ((unsigned long)&(((type *)0)->field))
 #define IOBUF_SIZE (offsetof(IOBuf, buf) + BUFFER_LEN)

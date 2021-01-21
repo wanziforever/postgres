@@ -12,9 +12,10 @@ static Oid dirtyOids[MAX_DIRTY_OIDS];
 static int64 dirtyTimestamp[MAX_DIRTY_OIDS];
 static int dirtyOidNum = 0;
 
+uint64 timeout_interval = 10; // seconds
 
 /* if there are many oids, consider to use a binary search */
-bool addDispatchDirtyOid(Oid oid, int64 ts) {
+bool addDispatchDirtyOid(Oid oid, uint64 ts) {
 	if (dirtyOidNum >= MAX_DIRTY_OIDS) {
 		return false;
 	}
@@ -29,14 +30,12 @@ bool addDispatchDirtyOid(Oid oid, int64 ts) {
 	return true;
 }
 
-
-int findDispatchDirtyOid(Oid oid, int64 *ts) {
+/* only return the index of the interval arary */
+int findDispatchDirtyOid(Oid oid) {
 	int i = 0;
 	for (; i < dirtyOidNum; i++) {
-		if (oid == dirtyOids[i]) {
-			*ts = dirtyTimestamp[i];
+		if (oid == dirtyOids[i]) 
 			return i;
-		}
 	}
 	return -1;
 }
@@ -54,7 +53,7 @@ Oid* getDirtyOids(void) {
 	return dirtyOids;
 }
 
-int64* getDirtyTimestamp(void) {
+uint64* getDirtyTimestamp(void) {
 	return dirtyTimestamp;
 }
 
@@ -77,5 +76,24 @@ void showAllDirtyOids(void) {
 	ereport(LOG, (errmsg("all dirty oids(%d): %s", dirtyOidNum, buf)));
 }
 
-
 /* there is no requirement logic to delete specific oid  */
+
+/*
+  return false for oid is not in dirty list or has already timeout
+         true for oid is taking effect
+ */
+bool examineDirtyOid(Oid oid) {
+	int i = -1;
+	if ((i = findDispatchDirtyOid(oid)) == -1) {
+		return false;
+	}
+
+	uint64 curts = getHgGetCurrentLocalSeconds();
+	if (dirtyTimestamp[i] + timeout_interval > curts) {
+		ereport(LOG, (errmsg("examineDirtyOid find the request oid, and it is not timeout (%d, %d)", curts, dirtyTimestamp[i])));
+		return true;
+	}
+
+	ereport(LOG, (errmsg("examineDirtyOid find the request oid, and it is timeout (%d, %d)", curts, dirtyTimestamp[i])));
+	return false;
+}

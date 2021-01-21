@@ -12,6 +12,8 @@ extern List *prepare_parsetreelist_for_dispatch;
 extern bool unamed_prepare_dispatched;
 List * pg_parse_query(const char *query_string);
 
+extern uint64 timeout_interval;
+
 char*  dml_write_list = NULL;
 char*  dml_read_list = NULL;
 //Store oids touched by read functions
@@ -202,6 +204,39 @@ bool further_check_select_semantics(Node *node) {
 				return true;
 		}
 	}
+	break;
+	/* fromlist->T_List and then each item is a RangeVar, or subselect or joinExpr
+	   and then expand the subsleect and JoinExpr, RangeVar is the final */
+	case T_RangeVar:
+	{
+		RangeVar *rv = (RangeVar*) node;
+		char *relname = rv->relname;
+		Oid relid = RelnameGetRelid(relname);
+		int ind;
+		ereport(LOG, (errmsg("going to examineDirtyOid %d", relid)));
+		if (examineDirtyOid(relid)) {
+			ereport(LOG, (errmsg("examine dirty oid return true, will do dispatch")));
+			return true;
+		}
+	}
+	break;
+		
+	case T_RangeSubselect:
+	{
+		RangeSubselect *r = (RangeSubselect*)node;
+		further_check_select_semantics(r->subquery);
+	}
+	break;
+	case T_JoinExpr:
+	{
+		/* first left tree, and then right tree */
+		JoinExpr *j = (JoinExpr *)node;
+		if (further_check_select_semantics(j->larg))
+			return true;
+		if (further_check_select_semantics(j->rarg))
+			return true;
+	}
+	break;
 	break;
 	default:
 		break;
@@ -394,7 +429,7 @@ bool getPrimaryHostInfo(char *host, char* port) {
 	return found;
 }
 
-int64 getHgGetCurrentLocalSeconds(void) {
+uint64 getHgGetCurrentLocalSeconds(void) {
 	struct timeval tp;
 	gettimeofday(&tp, NULL);
 	int64 secs = tp.tv_sec;
