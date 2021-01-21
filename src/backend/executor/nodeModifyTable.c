@@ -56,6 +56,7 @@
 #include "utils/datum.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "hgdispatch.h"
 
 
 static bool ExecOnConflictUpdate(ModifyTableState *mtstate,
@@ -2350,6 +2351,21 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 	saved_resultRelInfo = estate->es_result_relation_info;
 
 	resultRelInfo = mtstate->resultRelInfo;
+
+
+	/* add for DML dispatch feature
+	   code add here to track the DML operation for related relation
+	   this function is DML update, insert, delete command function and right
+	   place to record the relation, but here we cannot tell wether there is
+	   actual tuple get change, since there is where clause, the subplan scan
+	   work cannot find any valid tuple, so the update and delete will not touch
+	   any data, and also the insert will return a duplicated key error, and no
+	   data will be inserted at all. so still need further code to make sure
+	   there is data indeed change, and add the oid to dispatch dirty oid list.
+	*/
+	addDispatchDirtyOid(resultRelInfo->ri_RelationDesc->rd_id, GetCurrentTimestamp());
+
+	
 	i = 0;
 	foreach(l, node->plans)
 	{

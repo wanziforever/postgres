@@ -19,7 +19,8 @@ OBJS = \
 	hgdispatch_utility.o \
 	hgdispatch.o \
 	pqwrapper.o \
-	extendhgdispatch.o 
+	extendhgdispatch.o \
+	hgdirtyoids.o
 
 
 include $(top_srcdir)/src/backend/common.mk

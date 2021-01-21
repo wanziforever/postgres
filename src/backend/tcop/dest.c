@@ -41,6 +41,9 @@
 #include "libpq/pqformat.h"
 #include "utils/portal.h"
 
+#include "port/pg_bswap.h"
+#include "hgdispatch.h"
+
 
 /* ----------------
  *		dummy DestReceiver functions
@@ -158,6 +161,7 @@ CreateDestReceiver(CommandDest dest)
 	pg_unreachable();
 }
 
+
 /* ----------------
  *		EndCommand - clean up the destination at end of command
  * ----------------
@@ -197,6 +201,57 @@ EndCommand(const QueryCompletion *qc, CommandDest dest, bool force_undecorated_o
 			else
 				snprintf(completionTag, COMPLETION_TAG_BUFSIZE, "%s", tagname);
 			pq_putmessage('C', completionTag, strlen(completionTag) + 1);
+
+			/* decide to send dippatch dirty oid infor here instead of before
+			   sending Z command
+			*/
+			
+			do {
+				// only primary host and is dispatch connection need to do following
+				if (!(!RecoveryInProgress() && am_dml_dispatch))
+					break;
+				
+				int dirtyoidnum = 0;
+				Oid *alloids = NULL;
+				int64 *alltimestamps = NULL;
+
+				dirtyoidnum = getDirtyOidNum();
+
+				if (dirtyoidnum == 0)
+					break;
+				
+				alloids = getDirtyOids();
+				alltimestamps = getDirtyTimestamp();
+				// wether need to delete the created buffer, it is on the
+				// toppest level of memcontext?
+				int size = dirtyoidnum * (sizeof(Oid) + sizeof(int64));
+				char *p = (char*)palloc(size);
+				char *s = p;
+
+				int i = 0;
+				uint32 n32;
+				uint64 n64;
+
+				Oid newoid = 0;
+				uint64 newts = 0;
+				
+				for (; i < dirtyoidnum; i++) {
+					n32 = pg_hton32(alloids[i]);
+					n64 = pg_hton64(alltimestamps[i]);
+					memcpy(s, &n32, sizeof(Oid));
+					newoid = pg_ntoh32(n32);
+					ereport(LOG, (errmsg("--------------newoid: %d", newoid)));
+					newoid = pg_ntoh32(*(uint32*)s);
+					ereport(LOG, (errmsg("--------------newoid-2: %d", newoid)));
+					s += sizeof(Oid);
+					memcpy(s, &n64, sizeof(int64));
+					s += sizeof(int64);
+				}
+
+				pq_putmessage('O', p, size);
+				cleanupDispatchDirtyOids();
+				
+			} while (0);
 
 		case DestNone:
 		case DestDebug:

@@ -37,7 +37,7 @@ PGconn* createDispatchConnection(void) {
 	keywords[4] = "dbname";
 	values[4] =  MyProcPort->database_name;
 	keywords[5] = "fallback_application_name";
-	values[5] = "highgo_dispatch";
+	values[5] = "hgdispatch";
 	keywords[6] = "client_encoding";
 	values[6] = pg_get_client_encoding_name();
 	keywords[7] = NULL;

@@ -11,6 +11,18 @@
 	((id) == 'T' || (id) == 'D' || (id) == 'd' || (id) == 'V' || \
 	 (id) == 'E' || (id) == 'N' || (id) == 'A')
 
+// used to debug the return message char by char examination
+//void printhex(char *s, int len) {
+//	int i = 0;
+//	ereport(LOG, (errmsg("print hex charactors: ")));
+//	for (; i < len; i++) {
+//		ereport(LOG, (errmsg("%X", s[i])));
+//	}
+//}
+
+
+bool am_dml_dispatch = false;
+
 
 DispatchState* createDispatchState(void) {
 	DispatchState *st = palloc(sizeof(DispatchState));
@@ -158,6 +170,38 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 		case 'Z':
 			conn->asyncStatus = PGASYNC_IDLE;
 			break;
+		case 'O':
+			ereport(LOG, (errmsg("found the dirty oid mesasge parameter")));
+			showAllDirtyOids();
+			/* there is no oid number data, the number should be computed base
+			   on the parameter message length*/
+			int dirtyoidnum = 0;
+			if ((msgLength % (sizeof(Oid) + sizeof(int64))) != 0) {
+				ereport(LOG, (errmsg("fail to parse the dirty oids for invalid message length %d", msgLength)));
+			}
+			dirtyoidnum = msgLength / (sizeof(Oid) + sizeof(int64));
+			int i = 0;
+
+			for (; i < dirtyoidnum; i++) {
+				char *s = conn->inBuffer + conn->inCursor + i * (sizeof(Oid) + sizeof(int64));
+				Oid oid = (Oid)pg_ntoh32(*(Oid*)s);
+				s += sizeof(Oid);
+				int64 ts = pg_ntoh64(*(uint64*)s);
+				/* we do not use the timestamp send from the primary host,
+				   because we cannot depend on the time on the primary host,
+				   we record the timestamp in standby local, it is OK to do so
+				   because we also get this time to do compare with the local
+				   request timestamp, the only minor problem is when there is
+				   a lot of data received from the primary, and the timestamp
+				   in the local will be big lage from primary, but for a update
+				   scenario, the return value always to be small most of the time.
+				*/
+				int64 myts = getHgGetCurrentLocalSeconds();
+				addDispatchDirtyOid(oid, myts);
+			}
+
+			break;
+			
 		default:
 			//just ignore all the others
 			;
@@ -166,7 +210,7 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 		conn->inCursor += msgLength;
 		
 		// ignore the Z, becasue the standby logic will send a Z still
-		if (!consume_message_only && id != 'Z') 
+		if (!consume_message_only && id != 'Z' && id != 'O') 
 			hg_putbytes(conn->inBuffer + conn->inStart, msgLength+5);
 		
 		conn->inStart = conn->inCursor;

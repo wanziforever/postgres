@@ -137,6 +137,10 @@
 #include "storage/spin.h"
 #endif
 
+/* indicate i am a dispatcher process on the primary which defiend in
+   hgdispatch module, dispatcher postgres process has responsibility to
+   maintain the dirty oid parameters in return message */
+extern bool am_dml_dispatch;
 
 /*
  * Possible types of a backend. Beyond being the possible bkend_type values in
@@ -2202,6 +2206,15 @@ retry1:
 					pg_clean_ascii(tmp_app_name);
 
 					port->application_name = tmp_app_name;
+
+					/* in order not to change or add any change to staretup protocol,
+					   we use the special application name as the indicator of the dispatch
+					   connection, the related postgres process will has logic to handle the
+					   the dirty oid return values */
+					if (strcmp(tmp_app_name, "hgdispatch") == 0) {
+						ereport(LOG, (errmsg("we got a connection from high dispatch backend")));
+						am_dml_dispatch = true;
+					}
 				}
 			}
 			offset = valoffset + strlen(valptr) + 1;

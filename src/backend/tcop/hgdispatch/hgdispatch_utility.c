@@ -303,3 +303,10 @@ bool getPrimaryHostInfo(char *host, char* port) {
 
 	return found;
 }
+
+int64 getHgGetCurrentLocalSeconds(void) {
+	struct timeval tp;
+	gettimeofday(&tp, NULL);
+	int64 secs = tp.tv_sec;
+	return secs;
+}

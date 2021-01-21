@@ -200,7 +200,7 @@ DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
 
 	conn->outMsgEnd += msgLen;
 	
-	msgLen = pq_hton32(msgLen+4);
+	msgLen = pg_hton32(msgLen+4);
 	memcpy(conn->outBuffer + conn->outMsgStart, &msgLen, 4);
 
 	conn->outCount = conn->outMsgEnd;

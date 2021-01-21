@@ -1059,12 +1059,23 @@ uint32 pg_ntoh32(uint32 x) {
 		((x >> 24) & 0x000000ff);
 }
 
-uint32 pq_hton32(uint32 x) {
-	{
-		return
-			((x << 24) & 0xff000000) |
-			((x << 8) & 0x00ff0000) |
-			((x >> 8) & 0x0000ff00) |
-			((x >> 24) & 0x000000ff);
-	}
+uint32 pg_hton32(uint32 x) {
+	return
+		((x << 24) & 0xff000000) |
+		((x << 8) & 0x00ff0000) |
+		((x >> 8) & 0x0000ff00) |
+		((x >> 24) & 0x000000ff);
 }
+
+uint64 pg_ntoh64(uint64 x) {
+	return
+		((x << 56) & UINT64CONST(0xff00000000000000)) |
+		((x << 40) & UINT64CONST(0x00ff000000000000)) |
+		((x << 24) & UINT64CONST(0x0000ff0000000000)) |
+		((x << 8) & UINT64CONST(0x000000ff00000000)) |
+		((x >> 8) & UINT64CONST(0x00000000ff000000)) |
+		((x >> 24) & UINT64CONST(0x0000000000ff0000)) |
+		((x >> 40) & UINT64CONST(0x000000000000ff00)) |
+		((x >> 56) & UINT64CONST(0x00000000000000ff));
+}
+

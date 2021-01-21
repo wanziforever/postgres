@@ -5,7 +5,7 @@
 #include "libpq-fe.h"
 #include "tcop/cmdtag.h"
 #include "lib/stringinfo.h"
-#include "pqwrapper.h"
+//#include "pqwrapper.h"
 
 typedef enum DMLQueryStragegy {
 	DISPATCH_STANDBY,
@@ -43,9 +43,12 @@ bool handleResultAndForward(DispatchState *dstate);
 void handleHgSyncloss(PGconn *conn, char id, int msgLength);
 void dropUnnamedPrepareDispatch(void);
 
+#define MAX_DIRTY_OIDS 100
+
+int getDirtyOidNum(void);
+Oid* getDirtyOids(void);
+int64* getDirtyTimestamp(void);
 void showAllDirtyOids(void);
 int64 getHgGetCurrentLocalSeconds(void);
 
 extern bool am_dml_dispatch;
-
-#define MAX_DIRTY_OIDS 50
