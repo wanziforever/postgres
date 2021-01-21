@@ -503,6 +503,8 @@ static struct config_enum_entry shared_memory_options[] = {
 	{NULL, 0, false}
 };
 
+extern char* dml_write_list;
+extern char* dml_read_list;
 /*
  * Options for enum values stored in other modules
  */
@@ -775,6 +777,8 @@ const char *const config_group_names[] =
 	gettext_noop("Preset Options"),
 	/* CUSTOM_OPTIONS */
 	gettext_noop("Customized Options"),
+	/* HIGHGO_SSHA */
+        gettext_noop("Highgo_ssha Options"),
 	/* DEVELOPER_OPTIONS */
 	gettext_noop("Developer Options"),
 	/* help_config wants this array to be null-terminated */
@@ -4429,6 +4433,27 @@ static struct config_string ConfigureNamesString[] =
 		"",
 		check_backtrace_functions, assign_backtrace_functions, NULL
 	},
+	{
+                {"HGDB_CLUSTER_SQL_FORWARD_WRITE_FUNC_LIST", PGC_SIGHUP, HIGHGO_SSHA,
+                        gettext_noop("the functions which are forward to master."),
+                        NULL,
+                        GUC_LIST_INPUT
+                },
+                &dml_write_list,
+                "localhost",
+                NULL, NULL, NULL
+        },
+
+        {
+                {"HGDB_CLUSTER_SQL_FORWARD_READ_FUNC_LIST", PGC_SIGHUP, HIGHGO_SSHA,
+                        gettext_noop("the functions which are not forward to master."),
+                        NULL,
+                        GUC_LIST_INPUT
+                },
+                &dml_read_list,
+                "localhost",
+                NULL, NULL, NULL
+        },
 
 	/* End-of-list marker */
 	{

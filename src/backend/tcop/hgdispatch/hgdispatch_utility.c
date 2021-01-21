@@ -12,6 +12,90 @@ extern List *prepare_parsetreelist_for_dispatch;
 extern bool unamed_prepare_dispatched;
 List * pg_parse_query(const char *query_string);
 
+char*  dml_write_list = NULL;
+char*  dml_read_list = NULL;
+//Store oids touched by read functions
+int    dml_read_func_oids_num = 0;
+Oid    dml_read_func_oids[64] = {0};
+
+static char* is_func_in_list(FuncCall* node, char* list)
+{
+	if ((list == NULL) || (0 == *list))
+        {
+                return NULL;
+        }
+        else
+        {
+                char* name = strVal(llast(node->funcname));
+                if ((name == NULL) || (0 == *name))
+                {
+                        return NULL;
+                }
+                ereport(DEBUG5, (errmsg("FWD: Process the Function %s in '%s'", name, list)));
+                /* Get Function Name and compare with the list */
+                return strstr(list, name);
+        }
+}
+
+//figures out if the function is in the write function list configured in config file. 
+//It returns the position in the list if exists.
+static char* is_func_in_write_list(FuncCall* node, char* list)
+{
+	return is_func_in_list(node, list);
+}
+
+void set_dml_read_func_oids_num()
+{
+	dml_read_func_oids_num = 0;
+}
+
+//Stores read table oids in dml_read_func_oids array
+//to compare with dirty list so as to identify if it should be forwarded to primary node 
+static void extract_read_table_oids(FuncCall * node)
+{
+	char* last = NULL;
+        char* func_name = is_func_in_list(node, dml_read_list);
+        if (func_name == NULL)
+                return;
+
+        /* Find the localtion of '(',')' */
+        while((*func_name) != '(')
+        {
+                if(((*func_name) == 0) || ((*func_name) == ')'))
+                        return;
+                func_name++;
+        }
+
+	func_name++;
+        last = func_name;
+
+	 while((*last) != 0)
+        {
+                if((*last == ',') || (*last == ')'))
+                {
+                        char* p = strndup(func_name, last-func_name);
+                        Oid oid = RelnameGetRelid(p);
+                        elog(DEBUG2, "extract_read_table_oids %s = %d", p, oid);
+                        if (OidIsValid(oid))
+                        {
+                                if(dml_read_func_oids_num >= (sizeof(dml_read_func_oids)/sizeof(Oid)))
+                                        return;
+                                dml_read_func_oids[dml_read_func_oids_num++] = oid;
+                        }
+                        free(p);
+                        if (*last == ')')
+                                return;
+                        last++;
+                        func_name = last;
+                }
+                else
+                {
+                        last++;
+                }
+        }
+
+}
+
 // return true for update semantics in select
 bool further_check_select_semantics(Node *node) {
 	if (node == NULL) {
@@ -63,7 +147,12 @@ bool further_check_select_semantics(Node *node) {
 			return true;
 	}
 	break;
-//	case T_FuncCall:
+	case T_FuncCall:
+		if (is_func_in_write_list((FuncCall*)node, dml_write_list) != NULL)	
+			return true;
+		extract_read_table_oids((FuncCall*)node);
+		
+		
 //		if ((fwd_white_list == NULL) || (0 == *fwd_white_list))
 //		{
 //			return true;
@@ -120,6 +209,7 @@ bool further_check_select_semantics(Node *node) {
 
 	return false;
 }
+
 
 
 DMLQueryStragegy requireDispatch(CommandTag cmdTag, RawStmt* parsetree) {

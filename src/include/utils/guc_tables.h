@@ -102,6 +102,7 @@ enum config_group
 	ERROR_HANDLING_OPTIONS,
 	PRESET_OPTIONS,
 	CUSTOM_OPTIONS,
+	HIGHGO_SSHA, /* add by duzhongguo@highgo.com */
 	DEVELOPER_OPTIONS
 };
 
