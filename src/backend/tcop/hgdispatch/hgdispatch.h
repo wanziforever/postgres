@@ -57,3 +57,4 @@ extern bool enable_dml_dispatch;
 extern DispatchMode dispatch_check_scope;
 
 #define MAX_DIRTY_OIDS 50
+extern bool enable_dml_dispatch;

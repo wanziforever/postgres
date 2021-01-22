@@ -52,3 +52,5 @@ void showAllDirtyOids(void);
 uint64 getHgGetCurrentLocalSeconds(void);
 
 extern bool am_dml_dispatch;
+extern bool enable_dml_dispatch;
+extern uint64 dirty_oid_timeout_interval;

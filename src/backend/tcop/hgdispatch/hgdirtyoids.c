@@ -12,7 +12,7 @@ static Oid dirtyOids[MAX_DIRTY_OIDS];
 static int64 dirtyTimestamp[MAX_DIRTY_OIDS];
 static int dirtyOidNum = 0;
 
-uint64 timeout_interval = 10; // seconds
+uint64 dirty_oid_timeout_interval = 10; // seconds
 
 /* if there are many oids, consider to use a binary search */
 bool addDispatchDirtyOid(Oid oid, uint64 ts) {
@@ -89,7 +89,7 @@ bool examineDirtyOid(Oid oid) {
 	}
 
 	uint64 curts = getHgGetCurrentLocalSeconds();
-	if (dirtyTimestamp[i] + timeout_interval > curts) {
+	if (dirtyTimestamp[i] + dirty_oid_timeout_interval > curts) {
 		ereport(LOG, (errmsg("examineDirtyOid find the request oid, and it is not timeout (%d, %d)", curts, dirtyTimestamp[i])));
 		return true;
 	}

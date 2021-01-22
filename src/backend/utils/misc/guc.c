@@ -98,6 +98,7 @@
 #include "utils/tzparser.h"
 #include "utils/varlena.h"
 #include "utils/xml.h"
+#include "hgdispatch.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -2044,6 +2045,15 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 
+	{
+		{"enable_standby_dml_dispatch", PGC_POSTMASTER, HIGHGO_SSHA,
+		    gettext_noop("enable the feathre that let the standby node to dispatch DML operation to its primary host"),
+		},
+		&enable_dml_dispatch,
+		false,
+		NULL, NULL, NULL
+	},
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, false, NULL, NULL, NULL
@@ -3384,6 +3394,16 @@ static struct config_int ConfigureNamesInt[] =
 		0, 0, INT_MAX,
 		NULL, assign_tcp_user_timeout, show_tcp_user_timeout
 	},
+
+	{
+		{"dirty_table_timeout", PGC_POSTMASTER, HIGHGO_SSHA,
+		    gettext_noop("dispatch feature dirty table track timeout (seconds)"),
+		},
+		&dirty_oid_timeout_interval,
+		10, 0, INT_MAX,
+		NULL, NULL, NULL
+	},
+	
 
 	/* End-of-list marker */
 	{
