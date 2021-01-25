@@ -37,6 +37,7 @@ PGconn* createDispatchConnection(void) {
 	keywords[4] = "dbname";
 	values[4] =  MyProcPort->database_name;
 	keywords[5] = "fallback_application_name";
+	// special application name for dispatch, related check in the postmaster code
 	values[5] = "hgdispatch";
 	keywords[6] = "client_encoding";
 	values[6] = pg_get_client_encoding_name();
@@ -56,16 +57,26 @@ PGconn* createDispatchConnection(void) {
 	return conn;
 }
 
-PGconn* aaabb = NULL;
+
 PGconn* getCurrentDispatchConnection(void) {
 	//actually need the top level context
 	if (Dispatch_Connection == NULL) {
 		Dispatch_Connection = createDispatchConnection();
 	}
-	//return Dispatch_Connection;
-	//aaabb = createDispatchConnection();
-	//Dispatch_Connection = createDispatchConnection();
 	return Dispatch_Connection;
 }
 
+
+void resetConnOnError(PGconn *conn) {
+	/* meet error and reset the connection, for only on error and reset, because
+	   refer the resetConn function for libpq, since i cannot directly use the
+	   libpq internal function call, and simply just use the pgDropConnection
+	   utility function to drop the connection without send the X message.
+	*/
+	hgDropConnection(conn, true);
+	/* it is not good to touch the global variable on the pq wrapper function
+	   for hgDropConnection(), so reset the Dispatch_Connection here.
+	   actually whether need to create a connection here is a choice. */
+	Dispatch_Connection = createDispatchConnection();
+}
 

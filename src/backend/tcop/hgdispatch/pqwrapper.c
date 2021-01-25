@@ -92,7 +92,7 @@ hgsecure_raw_write(Port *port, const void *ptr, size_t len)
 	if (n < 0)
 	{
 		result_errno = SOCK_ERRNO;
-		ereport(LOG,
+		ereport(ERROR,
 				(errmsg("fail to send mesage due to %s",
 						SOCK_STRERROR(result_errno, sebuf, sizeof(sebuf)))));
 	}

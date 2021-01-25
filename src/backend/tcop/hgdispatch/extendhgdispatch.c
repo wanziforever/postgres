@@ -210,6 +210,7 @@ DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
 	if (hgSendSome(conn, conn->outCount) < 0) {
 		ereport(ERROR,
 				(errmsg("fail to send extended dispatch message")));
+		return NULL;
 	}
 
 	if (msgtype == 'P')

@@ -15,6 +15,8 @@ DispatchMode dispatch_check_scope = DISPATCH_TRANSACTION;
 	((id) == 'T' || (id) == 'D' || (id) == 'd' || (id) == 'V' || \
 	 (id) == 'E' || (id) == 'N' || (id) == 'A')
 
+#define MAX_DISPATCH_RETRY 3
+
 // used to debug the return message char by char examination
 //void printhex(char *s, int len) {
 //	int i = 0;
@@ -30,19 +32,52 @@ bool am_dml_dispatch = false;
 
 DispatchState* createDispatchState(void) {
 	DispatchState *st = palloc(sizeof(DispatchState));
+	// here i igore the PQsendStart operation for simple
 	PGconn *c = getCurrentDispatchConnection();
 	st->conn = c;
 	return st;
+}
+
+int remote_exec(PGconn *conn, char *query_string) {
+	/* normally we can just simply use the PQexec function call to send message,
+	   but the PQexec include the get result function which is not what we want.
+	   so we have to implement our result function by ourself, and seperate the
+	   message send function for flexible use for extended query */
+
+	int n = PQsendQuery(conn, query_string);
+	// ignore the cancel operation for simple
+	return n;
 }
 
 
 DispatchState* dispatch(const char* query_string) {
 	// need to pay attention to free the DispatchState instance
 	ereport(LOG, (errmsg("dispatch enter")));
-	DispatchState *dstate = createDispatchState();
+
 	ereport(LOG, (errmsg("going to do pgexec")));
+	int retrycount = 0;
+	int n = 0;
+	DispatchState *dstate = NULL;
 	
-	int n = PQsendQuery(dstate->conn, query_string);
+	do {
+		/* some time the connection will have problems, and we need to retry
+		   the message send */
+		dstate = createDispatchState();
+		n = remote_exec(dstate->conn, query_string);
+		if (n <= 0) { // the PQsendQuery will return 0 for pqFlush error
+			retrycount++;
+			if (retrycount >= MAX_DISPATCH_RETRY) {
+				ereport(ERROR,
+						(errmsg("dispatch send message fail after retry")));
+				return NULL;
+			}				
+			ereport(WARNING,
+					(errmsg("dispatch send message error, setup connection again(%d)", retrycount)));
+			resetConnOnError(dstate->conn);
+			pfree(dstate);
+			continue;
+		}
+	} while (retrycount);
 
 	ereport(LOG, (errmsg("after pqexec")));
 	// need to delete the state instance??
