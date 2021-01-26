@@ -1091,15 +1091,14 @@ exec_simple_query(const char *query_string)
 
 		set_ps_display(GetCommandTagName(commandTag));
 
-		if (enable_dml_dispatch && RecoveryInProgress()) {
-			// highgo dispatch work
+		if (USE_HIGHGO_DISPATCH) {
+			// highgo dispatch work, DISPATCH_NONE still will not dispatch
 			DMLQueryStragegy strategy = requireDispatch(commandTag, parsetree);
 			if (strategy == DISPATCH_PRIMARY || strategy == DISPATCH_PRIMARY_AND_STANDBY) {
-				ereport(LOG, (errmsg("going to do dispatch")));
 				DispatchState *dstate = dispatch(query_string);
 				dstate->stragegy = strategy;
 				if (!handleResultAndForward(dstate))
-					ereport(LOG, (errmsg("fail to dispatch query %s", query_string)));
+					ereport(ERROR, (errmsg("fail to dispatch query %s", query_string)));
 			}
 
 			if (strategy == DISPATCH_PRIMARY)
@@ -1757,9 +1756,6 @@ exec_bind_message(StringInfo input_message)
 	 * if the unnamed portal is specified.
 	 */
 
-	ereport(LOG,
-			(errmsg("going to create portal for portal name %s", portal_name)));
-	
 	if (portal_name[0] == '\0')
 		portal = CreatePortal(portal_name, true, true);
 	else
@@ -2079,6 +2075,9 @@ exec_bind_message(StringInfo input_message)
 static void
 exec_execute_message(const char *portal_name, long max_rows)
 {
+
+	ereport(LOG, (errmsg("-----------exec_execute_message enter")));
+
 	CommandDest dest;
 	DestReceiver *receiver;
 	Portal		portal;
@@ -4389,16 +4388,11 @@ PostgresMain(int argc, char *argv[],
 					/* Set statement_timestamp() */
 					SetCurrentStatementStartTimestamp();
 
-					ereport(LOG,
-							(errmsg("find the parse extend query message")));
-
 					if (USE_HIGHGO_DISPATCH)
 					{
 						int oldcur = input_message.cursor;
 						stmt_name = pq_getmsgstring(&input_message);
 						query_string = pq_getmsgstring(&input_message);
-						ereport(LOG,
-								(errmsg("%s", query_string)));
 						/* should be called here before exec_parse_message
 						   although it will be called again if not dispatch
 						   this call here is definitly for
@@ -4408,12 +4402,21 @@ PostgresMain(int argc, char *argv[],
 						start_xact_command();
 
 						dropUnnamedPrepareDispatch();
-						
-						if (requireExtendParseDispatch(query_string) == DISPATCH_PRIMARY) {
-							storePrepareQueriesPlanDispatched(stmt_name, true);
+						DMLQueryStragegy strategy = requireExtendParseDispatch(query_string);
+
+						ereport(LOG, (errmsg("---parse----%d  %s", strategy, query_string)));
+						storePrepareQueriesPlanDispatched(stmt_name, strategy);
+						if (strategy == DISPATCH_PRIMARY ||
+							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
 							DispatchState *dstate = extendDispatch('P', &input_message);
-							handleResultAndForward(dstate);
-							break;
+							dstate->stragegy = strategy;
+							if (!handleResultAndForward(dstate))
+								ereport(ERROR, (errmsg("fail to dispatch parse extend query %s",
+													   query_string)));
+							/* it is primary only dispatch, so break the switch
+							   without running the statement locally */
+							if (strategy == DISPATCH_PRIMARY)
+								break;
 						}
 						input_message.cursor = oldcur;
 					}
@@ -4448,17 +4451,22 @@ PostgresMain(int argc, char *argv[],
 					char *portal_name;
 					portal_name = pq_getmsgstring(&input_message);
 					stmt_name = pq_getmsgstring(&input_message);
-					//ereport(LOG,
-					//		(errmsg("backup role get bind message as stmt name %s, portal name=%s", stmt_name, portal_name)));
-					if (requireExtendBindDispatch(stmt_name) == DISPATCH_PRIMARY) {
-						storePrepareQueriesPortalDispatched(portal_name, true);
-						//ereport(LOG,
-						//		(errmsg("going to dispatch bind message")));
+
+					DMLQueryStragegy strategy = requireExtendBindDispatch(stmt_name);
+					storePrepareQueriesPortalDispatched(portal_name, strategy);
+					if (strategy == DISPATCH_PRIMARY ||
+						strategy == DISPATCH_PRIMARY_AND_STANDBY) {
 						DispatchState *dstate = extendDispatch('B', &input_message);
-						handleResultAndForward(dstate);
-						break;
+						dstate->stragegy = strategy;
+						if (!handleResultAndForward(dstate)) {
+							ereport(ERROR, (errmsg("fail to dispatch bind %s",
+												   portal_name)));
+						}
+
+						if (strategy == DISPATCH_PRIMARY) {
+							break;
+						}
 					}
-					storePrepareQueriesPortalDispatched(portal_name, false);
 					/* restore the cursor for workaround */
 					input_message.cursor = oldcur;
 				}
@@ -4486,10 +4494,18 @@ PostgresMain(int argc, char *argv[],
 						int oldcur = input_message.cursor;
 						char *portal_name;
 						portal_name = pq_getmsgstring(&input_message);
-						if (requireExtendExecuteDispatch(portal_name) == DISPATCH_PRIMARY) {
+
+						DMLQueryStragegy strategy = requireExtendExecuteDispatch(portal_name);
+						if (strategy == DISPATCH_PRIMARY ||
+							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
 							DispatchState *dstate = extendDispatch('E', &input_message);
-							handleResultAndForward(dstate);
-							break;
+							dstate->stragegy = strategy;
+							if (!handleResultAndForward(dstate)) {
+								ereport(ERROR, (errmsg("fail to dispatch execute extend query %s",
+													   portal_name)));
+							}
+							if (strategy == DISPATCH_PRIMARY)
+								break;
 						}
 						/* restore the cursor for workaround */
 						input_message.cursor = oldcur;
@@ -4589,6 +4605,47 @@ PostgresMain(int argc, char *argv[],
 
 					/* Set statement_timestamp() (needed for xact) */
 					SetCurrentStatementStartTimestamp();
+
+					if (USE_HIGHGO_DISPATCH)
+					{
+						int oldcur = input_message.cursor;
+						int			describe_type;
+						const char *describe_target;
+						DMLQueryStragegy strategy = DISPATCH_NONE;
+
+						describe_type = pq_getmsgbyte(&input_message);
+						describe_target = pq_getmsgstring(&input_message);
+
+						switch (describe_type) {
+						case 'S':
+							/* describe_target as the statement name */
+							strategy = requireExtendBindDispatch(describe_target);
+							break;
+						case 'P':
+							/* describe_target as the portal name */
+							strategy = requireExtendExecuteDispatch(describe_target);
+							break;
+						default:
+							ereport(ERROR,
+									(errcode(ERRCODE_PROTOCOL_VIOLATION),
+									 errmsg("invalid DESCRIBE message subtype %d", describe_type)));
+							break;
+						}
+						
+						if (strategy == DISPATCH_PRIMARY ||
+							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
+							DispatchState *dstate = extendDispatch('D', &input_message);
+							dstate->stragegy = strategy;
+							if (!handleResultAndForward(dstate)) {
+								ereport(ERROR, (errmsg("fail to dispatch DESCRIBE extend query %s",
+													   describe_target)));
+							}
+							if (strategy == DISPATCH_PRIMARY)
+								break;
+						}
+						/* restore the cursor for workaround */
+						input_message.cursor = oldcur;
+					}
 
 					describe_type = pq_getmsgbyte(&input_message);
 					describe_target = pq_getmsgstring(&input_message);

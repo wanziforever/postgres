@@ -9,7 +9,7 @@
 #include "hgdispatch.h"
 
 extern List *prepare_parsetreelist_for_dispatch;
-extern bool unamed_prepare_dispatched;
+extern DMLQueryStragegy unamed_prepare_dispatched;
 List * pg_parse_query(const char *query_string);
 
 extern uint64 timeout_interval;
@@ -327,9 +327,6 @@ DMLQueryStragegy requireExtendParseDispatch(const char* query_string) {
 }
 
 DMLQueryStragegy requireExtendBindDispatch(const char* stmt_name) {
-	if (!RecoveryInProgress())
-		return false;
-
 	if (stmt_name[0] == '\0') {
 		return unamed_prepare_dispatched;
 	}
@@ -338,9 +335,6 @@ DMLQueryStragegy requireExtendBindDispatch(const char* stmt_name) {
 }
 
 DMLQueryStragegy requireExtendExecuteDispatch(const char* portal_name) {
-	if (!RecoveryInProgress())
-		return false;
-	
 	return fetchPrepareQueriesPortalDispatched(portal_name);
 }
 

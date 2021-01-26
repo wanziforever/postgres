@@ -11,6 +11,7 @@
 #define USE_HIGHGO_DISPATCH (enable_dml_dispatch && RecoveryInProgress())
 
 typedef enum DMLQueryStragegy {
+	DISPATCH_NONE,
 	DISPATCH_STANDBY,
 	DISPATCH_PRIMARY,
 	DISPATCH_PRIMARY_AND_STANDBY
@@ -28,7 +29,7 @@ typedef struct {
 
 typedef struct {
 	char extendName[NAMEDATALEN]; // both for portal name and stmt name
-	bool isdispatched;
+	DMLQueryStragegy strategy;
 } PrepareQueryDispatched;
 
 bool getPrimaryHostInfo(char *host, char* port);
@@ -42,9 +43,9 @@ char *get_password(const char *role);
 DMLQueryStragegy requireExtendParseDispatch(const char* query_string);
 DMLQueryStragegy requireExtendBindDispatch(const char* stmt_name);
 DMLQueryStragegy requireExtendExecuteDispatch(const char* portal_name);
-bool fetchPrepareQueriesPlanDispatched(const char *stmt_name);
-bool fetchPrepareQueriesPortalDispatched(const char *portal_name);
-void storePrepareQueriesDispatched(const char *stmt_name, bool need_dispatch);
+DMLQueryStragegy fetchPrepareQueriesPlanDispatched(const char *stmt_name);
+DMLQueryStragegy fetchPrepareQueriesPortalDispatched(const char *portal_name);
+void storePrepareQueriesDispatched(const char *stmt_name, DMLQueryStragegy s);
 DispatchState* extendDispatch(char msgtype, StringInfo input_message);
 void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only);
 bool handleResultAndForward(DispatchState *dstate);

@@ -6,7 +6,7 @@
 
 
 
-bool unamed_prepare_dispatched = false;
+DMLQueryStragegy unamed_prepare_dispatched = DISPATCH_NOME;
 /* currently parse stmtname and portal name use the same hash instance */
 static HTAB *prepare_queries_plan_dispatched = NULL;
 static HTAB *prepare_queries_portal_dispatched = NULL;
@@ -46,14 +46,14 @@ void dropUnnamedPrepareDispatch(void) {
 	unamed_prepare_dispatched = false;
 }
 
-void storePrepareQueriesPlanDispatched(const char *stmt_name, bool need_dispatch) {
+void storePrepareQueriesPlanDispatched(const char *stmt_name, DMLQueryStragegy s) {
 	PrepareQueryDispatched *entry;
 	bool found;
 
 
 	if (stmt_name[0] == '\0') {
-		unamed_prepare_dispatched = true;
-		//return;
+		unamed_prepare_dispatched = s;
+		return;
 	}
 
 	if (!prepare_queries_plan_dispatched)
@@ -69,11 +69,11 @@ void storePrepareQueriesPlanDispatched(const char *stmt_name, bool need_dispatch
 				(errcode(ERRCODE_DUPLICATE_PSTATEMENT),
 				 errmsg("prepared statement dispatch \"%s\" already exits", stmt_name)));
 	}
-	entry->isdispatched = need_dispatch;
+	entry->strategy = s;
 }
 
 
-void storePrepareQueriesPortalDispatched(const char *portal_name, bool need_dispatch) {
+void storePrepareQueriesPortalDispatched(const char *portal_name, DMLQueryStragegy s) {
 	PrepareQueryDispatched *entry;
 	bool found;
 
@@ -90,11 +90,11 @@ void storePrepareQueriesPortalDispatched(const char *portal_name, bool need_disp
 				(errcode(ERRCODE_DUPLICATE_PSTATEMENT),
 				 errmsg("prepared portal dispatch \"%s\" already exits", portal_name)));
 	}
-	entry->isdispatched = need_dispatch;
+	entry->strategy = s;
 
 }
 
-bool fetchPrepareQueriesPlanDispatched(const char *stmt_name) {
+DMLQueryStragegy fetchPrepareQueriesPlanDispatched(const char *stmt_name) {
 	PrepareQueryDispatched *entry;
 	if (prepare_queries_plan_dispatched) {
 		entry = (PrepareQueryDispatched *) hash_search(prepare_queries_plan_dispatched,
@@ -107,15 +107,15 @@ bool fetchPrepareQueriesPlanDispatched(const char *stmt_name) {
 
 
 	if (entry == NULL) {
-		return false;
+		return DISPATCH_NOME;
 	} else {
-		return entry->isdispatched;
+		return entry->strategy;
 	}
 	
-	return false;
+	return DISPATCH_NOME;
 }
 
-bool fetchPrepareQueriesPortalDispatched(const char *portal_name) {
+DMLQueryStragegy fetchPrepareQueriesPortalDispatched(const char *portal_name) {
 	PrepareQueryDispatched *entry;
 	if (prepare_queries_portal_dispatched) {
 		entry = (PrepareQueryDispatched *) hash_search(prepare_queries_portal_dispatched,
@@ -127,12 +127,12 @@ bool fetchPrepareQueriesPortalDispatched(const char *portal_name) {
 	}
 
 	if (entry == NULL) {
-		return false;
+		return DISPATCH_NOME;
 	} else {
-		return entry->isdispatched;
+		return entry->strategy;
 	}
 	
-	return false;
+	return DISPATCH_NOME;
 }
 
 
