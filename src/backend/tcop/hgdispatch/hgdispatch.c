@@ -76,7 +76,7 @@ DispatchState* dispatch(const char* query_string) {
 		}
 	} while (retrycount);
 
-	ereport(LOG, (errmsg("after pqexec")));
+	//ereport(LOG, (errmsg("after pqexec")));
 	// need to delete the state instance??
 	return dstate;
 }

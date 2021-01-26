@@ -232,17 +232,10 @@ EndCommand(const QueryCompletion *qc, CommandDest dest, bool force_undecorated_o
 				uint32 n32;
 				uint64 n64;
 
-				Oid newoid = 0;
-				uint64 newts = 0;
-				
 				for (; i < dirtyoidnum; i++) {
 					n32 = pg_hton32(alloids[i]);
 					n64 = pg_hton64(alltimestamps[i]);
 					memcpy(s, &n32, sizeof(Oid));
-					newoid = pg_ntoh32(n32);
-					ereport(LOG, (errmsg("--------------newoid: %d", newoid)));
-					newoid = pg_ntoh32(*(uint32*)s);
-					ereport(LOG, (errmsg("--------------newoid-2: %d", newoid)));
 					s += sizeof(Oid);
 					memcpy(s, &n64, sizeof(int64));
 					s += sizeof(int64);
