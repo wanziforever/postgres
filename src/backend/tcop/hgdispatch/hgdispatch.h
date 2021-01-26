@@ -7,6 +7,9 @@
 #include "lib/stringinfo.h"
 #include "pqwrapper.h"
 
+
+#define USE_HIGHGO_DISPATCH (enable_dml_dispatch && RecoveryInProgress())
+
 typedef enum DMLQueryStragegy {
 	DISPATCH_STANDBY,
 	DISPATCH_PRIMARY,

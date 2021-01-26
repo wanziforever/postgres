@@ -208,6 +208,9 @@ EndCommand(const QueryCompletion *qc, CommandDest dest, bool force_undecorated_o
 			
 			do {
 				// only primary host and is dispatch connection need to do following
+				if (!enable_dml_dispatch)
+					break;
+				
 				if (!(!RecoveryInProgress() && am_dml_dispatch))
 					break;
 				

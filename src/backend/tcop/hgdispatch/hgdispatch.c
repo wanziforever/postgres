@@ -4,7 +4,7 @@
 
 //static DispatchPipline *Dispatch_Pipline = NULL;
 
-bool enable_dml_dispatch = true;
+bool enable_dml_dispatch = false;
 //DispatchMode dispatch_check_scope = DISPATCH_SESSION;
 DispatchMode dispatch_check_scope = DISPATCH_TRANSACTION;
 

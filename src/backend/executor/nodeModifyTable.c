@@ -2363,7 +2363,8 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 	   data will be inserted at all. so still need further code to make sure
 	   there is data indeed change, and add the oid to dispatch dirty oid list.
 	*/
-	addDispatchDirtyOid(resultRelInfo->ri_RelationDesc->rd_id, GetCurrentTimestamp());
+	if (enable_dml_dispatch)
+		addDispatchDirtyOid(resultRelInfo->ri_RelationDesc->rd_id, GetCurrentTimestamp());
 
 	
 	i = 0;

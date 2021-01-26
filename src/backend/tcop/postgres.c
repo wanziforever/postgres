@@ -1091,7 +1091,7 @@ exec_simple_query(const char *query_string)
 
 		set_ps_display(GetCommandTagName(commandTag));
 
-		if (RecoveryInProgress()) {
+		if (enable_dml_dispatch && RecoveryInProgress()) {
 			// highgo dispatch work
 			DMLQueryStragegy strategy = requireDispatch(commandTag, parsetree);
 			if (strategy == DISPATCH_PRIMARY || strategy == DISPATCH_PRIMARY_AND_STANDBY) {
@@ -4392,7 +4392,7 @@ PostgresMain(int argc, char *argv[],
 					ereport(LOG,
 							(errmsg("find the parse extend query message")));
 
-					if (RecoveryInProgress())
+					if (USE_HIGHGO_DISPATCH)
 					{
 						int oldcur = input_message.cursor;
 						stmt_name = pq_getmsgstring(&input_message);
@@ -4441,19 +4441,19 @@ PostgresMain(int argc, char *argv[],
 				/* Set statement_timestamp() */
 				SetCurrentStatementStartTimestamp();
 
-				if (RecoveryInProgress())
+				if (USE_HIGHGO_DISPATCH)
 				{
 					int oldcur = input_message.cursor;
 					char *stmt_name;
 					char *portal_name;
 					portal_name = pq_getmsgstring(&input_message);
 					stmt_name = pq_getmsgstring(&input_message);
-					ereport(LOG,
-							(errmsg("backup role get bind message as stmt name %s, portal name=%s", stmt_name, portal_name)));
+					//ereport(LOG,
+					//		(errmsg("backup role get bind message as stmt name %s, portal name=%s", stmt_name, portal_name)));
 					if (requireExtendBindDispatch(stmt_name) == DISPATCH_PRIMARY) {
 						storePrepareQueriesPortalDispatched(portal_name, true);
-						ereport(LOG,
-								(errmsg("going to dispatch bind message")));
+						//ereport(LOG,
+						//		(errmsg("going to dispatch bind message")));
 						DispatchState *dstate = extendDispatch('B', &input_message);
 						handleResultAndForward(dstate);
 						break;
@@ -4481,7 +4481,7 @@ PostgresMain(int argc, char *argv[],
 					/* Set statement_timestamp() */
 					SetCurrentStatementStartTimestamp();
 
-					if (RecoveryInProgress())
+					if (USE_HIGHGO_DISPATCH)
 					{
 						int oldcur = input_message.cursor;
 						char *portal_name;
@@ -4491,8 +4491,6 @@ PostgresMain(int argc, char *argv[],
 							handleResultAndForward(dstate);
 							break;
 						}
-						ereport(LOG,
-								(errmsg("---------------------------execution-----------------")));
 						/* restore the cursor for workaround */
 						input_message.cursor = oldcur;
 					}
