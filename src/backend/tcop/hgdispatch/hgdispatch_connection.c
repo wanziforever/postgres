@@ -11,7 +11,6 @@ static PGconn *Dispatch_Connection = NULL;
 extern bool getPrimaryHostInfo(char *host, char* port);
 
 PGconn* createDispatchConnection(void) {
-	ereport(LOG, (errmsg("create dispatch connection enter")));
 	#define PARAMS_ARRAY_SIZE	8
 
 	const char *keywords[PARAMS_ARRAY_SIZE];
@@ -22,7 +21,7 @@ PGconn* createDispatchConnection(void) {
 	PGconn *conn = NULL;
 
 	if (!getPrimaryHostInfo(primaryHostName, primaryPort)) {
-		ereport(LOG, (errmsg("fail to get primary host information!")));
+		ereport(ERROR, (errmsg("fail to get primary host information!")));
 		return NULL;
 	}
 
@@ -47,7 +46,7 @@ PGconn* createDispatchConnection(void) {
 	conn = PQconnectdbParams(keywords, values, 1);
 
 	if (PQstatus(conn) == CONNECTION_BAD) {
-		ereport(LOG,
+		ereport(ERROR,
 			(errmsg("fail to create dispatch connection, %s",
 				PQerrorMessage(conn))));
 		PQfinish(conn);

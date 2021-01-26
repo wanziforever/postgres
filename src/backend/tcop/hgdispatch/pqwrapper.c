@@ -648,7 +648,7 @@ hgSendSome(PGconn *conn, int len)
 		if (sent < 0)
 		{
 			result_errno = SOCK_ERRNO;
-			ereport(LOG,
+			ereport(ERROR,
 				(errmsg("fail to send mesage due to %s",
 						SOCK_STRERROR(result_errno, sebuf, sizeof(sebuf)))));
 			/* Anything except EAGAIN/EWOULDBLOCK/EINTR is trouble */

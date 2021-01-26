@@ -52,9 +52,6 @@ int remote_exec(PGconn *conn, char *query_string) {
 
 DispatchState* dispatch(const char* query_string) {
 	// need to pay attention to free the DispatchState instance
-	ereport(LOG, (errmsg("dispatch enter")));
-
-	ereport(LOG, (errmsg("going to do pgexec")));
 	int retrycount = 0;
 	int n = 0;
 	DispatchState *dstate = NULL;
@@ -124,7 +121,7 @@ bool handleResultAndForward(DispatchState *dstate) {
 		dispatchInputParseAndSend(conn, consume_message_only);
 		break;
 	default:
-		ereport(LOG,
+		ereport(ERROR,
 				(errmsg("unexpect async status %d", conn->asyncStatus)));
 		;
 	}
@@ -141,7 +138,6 @@ void handleHgSyncloss(PGconn *conn, char id, int msgLength) {
 
 void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 	// only check the parameers which is usefull for dispatch private
-	ereport(LOG, (errmsg("dispatch input parse and send enter")));
 	char id;
 	int msgLength;
 	int avail;
@@ -210,13 +206,12 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 			conn->asyncStatus = PGASYNC_IDLE;
 			break;
 		case 'O':
-			ereport(LOG, (errmsg("found the dirty oid mesasge parameter")));
 			showAllDirtyOids();
 			/* there is no oid number data, the number should be computed base
 			   on the parameter message length*/
 			int dirtyoidnum = 0;
 			if ((msgLength % (sizeof(Oid) + sizeof(int64))) != 0) {
-				ereport(LOG, (errmsg("fail to parse the dirty oids for invalid message length %d", msgLength)));
+				ereport(ERROR, (errmsg("fail to parse the dirty oids for invalid message length %d", msgLength)));
 			}
 			dirtyoidnum = msgLength / (sizeof(Oid) + sizeof(int64));
 			int i = 0;

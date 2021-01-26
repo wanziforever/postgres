@@ -77,7 +77,6 @@ void storePrepareQueriesPortalDispatched(const char *portal_name, bool need_disp
 	PrepareQueryDispatched *entry;
 	bool found;
 
-
 	if (!prepare_queries_portal_dispatched)
 		initPrepareQueryPortalDispatch();
 
@@ -93,45 +92,6 @@ void storePrepareQueriesPortalDispatched(const char *portal_name, bool need_disp
 	}
 	entry->isdispatched = need_dispatch;
 
-
-
-	PrepareQueryDispatched *yy;
-	yy = (PrepareQueryDispatched*) hash_search(prepare_queries_portal_dispatched,
-												  portal_name,
-												  HASH_FIND,
-												  NULL);
-	
-	if (yy == NULL) {
-		ereport(LOG,
-				(errmsg("fail to get hash entry for portal name %s", portal_name)));
-	}
-
-	//// ***************************
-	//PrepareQueryDispatched *yy;
-	//yy = (PrepareQueryDispatched*) hash_search(prepare_queries_portal_dispatched,
-	//											  "ffff",
-	//											  HASH_ENTER,
-	//											  &found);
-	//
-	//if (found) {
-	//	ereport(WARNING,
-	//			(errcode(ERRCODE_DUPLICATE_PSTATEMENT),
-	//			 errmsg("prepared portal dispatch \"%s\" already exits", portal_name)));
-	//}
-	//entry->isdispatched = need_dispatch;
-	//
-	//
-	//yy = (PrepareQueryDispatched*) hash_search(prepare_queries_portal_dispatched,
-	//										   "ddd",
-	//										   HASH_FIND,
-	//										   NULL);
-	//if (yy == NULL) {
-	//	ereport(LOG,
-	//			(errmsg("-------------------still cannot find the target the portal")));
-	//}
-
-	
-	
 }
 
 bool fetchPrepareQueriesPlanDispatched(const char *stmt_name) {
@@ -166,7 +126,6 @@ bool fetchPrepareQueriesPortalDispatched(const char *portal_name) {
 		entry = NULL;
 	}
 
-
 	if (entry == NULL) {
 		return false;
 	} else {
@@ -186,7 +145,7 @@ DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
 	// cannot use hg_putbytes, becasue libpq has two parts of functionality,
 	// one is used for client, and the other is used for send message beck to
 	// client, hg_putbytes is belongs to the later one.
-	ereport(LOG, (errmsg("extend dispatch enter")));
+
 	DispatchState *dstate = createDispatchState();
 	PGconn *conn = dstate->conn;
 	
@@ -218,7 +177,6 @@ DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
 		set_dml_read_func_oids_num();
 	}
 
-	ereport(LOG, (errmsg("after pqexec")));
 	// need to delete the state instance??
 	return dstate;
 }

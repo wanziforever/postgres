@@ -213,9 +213,8 @@ bool further_check_select_semantics(Node *node) {
 		char *relname = rv->relname;
 		Oid relid = RelnameGetRelid(relname);
 		int ind;
-		ereport(LOG, (errmsg("going to examineDirtyOid %d", relid)));
+
 		if (examineDirtyOid(relid)) {
-			ereport(LOG, (errmsg("examine dirty oid return true, will do dispatch")));
 			return true;
 		}
 	}
@@ -254,7 +253,6 @@ DMLQueryStragegy requireDispatch(CommandTag cmdTag, RawStmt* parsetree) {
 	{
 		/* actually copy to will fail to write to standby, but please don't run copy to standby */
 		/* handle for update series cmd */
-		ereport(LOG, (errmsg("--------------requireDispatch ----------")));
 		bool update_semantics_in_select = false;;
 		update_semantics_in_select = further_check_select_semantics(parsetree->stmt);
 		if (update_semantics_in_select) {
@@ -325,8 +323,6 @@ DMLQueryStragegy requireExtendParseDispatch(const char* query_string) {
 	
 	CommandTag cmdTag = CreateCommandTag(raw_parse_tree->stmt);
 
-	ereport(LOG,
-			(errmsg("the command tag for sql is %d, %d, %s", cmdTag, CMDTAG_SELECT_FOR_UPDATE, query_string)));
 	return requireDispatch(cmdTag, raw_parse_tree);
 }
 
