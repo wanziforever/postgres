@@ -2,6 +2,7 @@
 #include "postgres.h"
 #include "pqwrapper.h"
 #include "libpq/libpq-be.h"
+#include "libpq/libpq.h"
 #include "poll.h"
 
 extern struct Port* MyProcPort;
@@ -779,6 +780,24 @@ hgFlush(PGconn *conn)
 }
 
 
+int hgPutMsgBytes(const void *buf, size_t len, PGconn *conn) {
+	if (hgCheckOutBufferSpace(conn->outMsgEnd + len, conn))
+		return EOF;
+	memcpy(conn->outBuffer + conn->outMsgEnd, buf, len);
+	conn->outMsgEnd += len;
+	return 0;
+}
+
+
+int hgPutMsgEnd(PGconn *conn) {
+	if (conn->outMsgStart >= 0) {
+		uint32 msgLen = conn->outMsgEnd - conn->outMsgStart;
+		msgLen = pg_hton32(msgLen);
+		memcpy(conn->outBuffer + conn->outMsgStart, &msgLen, 4);
+	}
+}
+
+
 /*
  * pqWait: wait until we can read or write the connection socket
  *
@@ -1035,13 +1054,19 @@ void hgDropConnection(PGconn *conn, bool flushInput)
 	/* Free authentication/encryption state */
 }
 
-void hg_putbytes(char *buf, int len) {
-	int n = hgsecure_raw_write(MyProcPort, buf, len);
+void hg_raw_putbytes(char *buf, int len) {
+		int n = pq_putbytes(buf, len);
+	// int n = hgsecure_raw_write(MyProcPort, buf, len);
 	if (n < 0) {
 		ereport(ERROR,
 				errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
 				errmsg("could not send data !"));
 	}
+}
+
+void hg_raw_flush(void) {
+	ereport(LOG, (errmsg("going to flush the message")));
+	pq_flush();
 }
 
 

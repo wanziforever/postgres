@@ -38,6 +38,8 @@ DispatchState* createDispatchState(void) {
 	return st;
 }
 
+
+
 int remote_exec(PGconn *conn, char *query_string) {
 	/* normally we can just simply use the PQexec function call to send message,
 	   but the PQexec include the get result function which is not what we want.
@@ -86,8 +88,9 @@ bool handleResultAndForward(DispatchState *dstate) {
 
 	bool consume_message_only = false;
 	consume_message_only = dstate->stragegy == DISPATCH_PRIMARY_AND_STANDBY ? true:false;
-		
+	ereport(LOG, (errmsg("first call to dispatchInputParseAndSend with asyncStatus is %d", conn->asyncStatus)));
 	dispatchInputParseAndSend(dstate->conn, consume_message_only);
+	hg_raw_flush();
 	
 	while (conn->asyncStatus == PGASYNC_BUSY) {
 		int flushResult;
@@ -108,9 +111,9 @@ bool handleResultAndForward(DispatchState *dstate) {
 					 errmsg("fail to handle the connection for dispatch")));
 			return false;
 		}
-		
+		ereport(LOG, (errmsg("second call to dispatchInputParseAndSend")));
 		dispatchInputParseAndSend(dstate->conn, consume_message_only);
-		
+		hg_raw_flush();
 	}
 
 	switch (conn->asyncStatus) {
@@ -141,13 +144,18 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 	char id;
 	int msgLength;
 	int avail;
+	ereport(LOG, (errmsg("-----dispatchInputParseAndSend enter with consume_message_only %d", consume_message_only)));
 	
 	for (;;) {
 		conn->inCursor = conn->inStart;
-		if (hgGetc(&id, conn))
+		if (hgGetc(&id, conn)) {
+			ereport(LOG, (errmsg("getc fail")));
 			return;
-		if (hgGetInt(&msgLength, 4, conn))
+		}
+		if (hgGetInt(&msgLength, 4, conn)) {
+			ereport(LOG, (errmsg("getInt fail")));
 			return;
+		}
 
 		/*
 		 * Try to validate message type/length here.  A length less than 4 is
@@ -191,12 +199,14 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 				 */
 				handleHgSyncloss(conn, id, msgLength);
 			}
+			ereport(LOG, (errmsg("fail for avail")));
 			return;
 		}
 		
 		// do something
 		// maybe we can handle the dirty oid here which is send by primary
 		// with private id
+
 
 		switch (id) {
 		case 'C':
@@ -241,14 +251,17 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 			;
 		}
 
+		ereport(LOG, (errmsg("----------------meet the response id %c", id)));
+
 		conn->inCursor += msgLength;
 		
 		// ignore the Z, becasue the standby logic will send a Z still
-		if (!consume_message_only && id != 'Z' && id != 'O') 
-			hg_putbytes(conn->inBuffer + conn->inStart, msgLength+5);
+		if (!consume_message_only && id != 'Z' && id != 'O') {
+			ereport(LOG, (errmsg("---------going to send bytes")));
+			hg_raw_putbytes(conn->inBuffer + conn->inStart, msgLength+5);
+		}
 		
 		conn->inStart = conn->inCursor;
-		
 	}
 	
 }

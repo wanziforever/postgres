@@ -49,7 +49,8 @@ int hgWriteReady(PGconn *conn);
 int hgSocketCheck(PGconn *conn, int forRead, int forWrite, time_t end_time);
 int hgSocketPoll(int sock, int forRead, int forWrite, time_t end_time);
 void hgDropConnection(PGconn *conn, bool flushInput);
-void hg_putbytes(char *buf, int len);
+void hg_raw_putbytes(char *buf, int len);
+void hg_raw_flush(void);
 
 
 

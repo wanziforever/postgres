@@ -85,6 +85,7 @@
 #include "hgdispatch/hgdispatch.h"
 #include "hgdispatch/hgdispatch_utility.h"
 extern List *prepare_parsetreelist_for_dispatch;
+extern DMLQueryStragegy execution_strategy_choice;
 
 /* ----------------
  *		global variables
@@ -1372,6 +1373,7 @@ exec_parse_message(const char *query_string,	/* string to execute */
 				   int numParams)	/* number of parameters */
 	
 {
+	ereport(LOG, (errmsg("-----------exec_parse_message enter")));
 	MemoryContext unnamed_stmt_context = NULL;
 	MemoryContext oldcontext;
 	List	   *parsetree_list;
@@ -1639,6 +1641,7 @@ exec_parse_message(const char *query_string,	/* string to execute */
 static void
 exec_bind_message(StringInfo input_message)
 {
+	ereport(LOG, (errmsg("-----------exec_bind_message enter")));
 	const char *portal_name;
 	const char *stmt_name;
 	int			numPFormats;
@@ -2525,6 +2528,7 @@ errdetail_recovery_conflict(void)
 static void
 exec_describe_statement_message(const char *stmt_name)
 {
+	ereport(LOG, (errmsg("-----------exec_describe_statement__message enter")));
 	CachedPlanSource *psrc;
 
 	/*
@@ -2620,6 +2624,7 @@ exec_describe_statement_message(const char *stmt_name)
 static void
 exec_describe_portal_message(const char *portal_name)
 {
+	ereport(LOG, (errmsg("-----------exec_describe_portal_message enter")));
 	Portal		portal;
 
 	/*
@@ -4410,9 +4415,9 @@ PostgresMain(int argc, char *argv[],
 							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
 							DispatchState *dstate = extendDispatch('P', &input_message);
 							dstate->stragegy = strategy;
-							if (!handleResultAndForward(dstate))
-								ereport(ERROR, (errmsg("fail to dispatch parse extend query %s",
-													   query_string)));
+							//if (!handleResultAndForward(dstate))
+							//	ereport(ERROR, (errmsg("fail to dispatch parse extend query %s",
+							//						   query_string)));
 							/* it is primary only dispatch, so break the switch
 							   without running the statement locally */
 							if (strategy == DISPATCH_PRIMARY)
@@ -4458,10 +4463,10 @@ PostgresMain(int argc, char *argv[],
 						strategy == DISPATCH_PRIMARY_AND_STANDBY) {
 						DispatchState *dstate = extendDispatch('B', &input_message);
 						dstate->stragegy = strategy;
-						if (!handleResultAndForward(dstate)) {
-							ereport(ERROR, (errmsg("fail to dispatch bind %s",
-												   portal_name)));
-						}
+						//if (!handleResultAndForward(dstate)) {
+						//	ereport(ERROR, (errmsg("fail to dispatch bind %s",
+						//						   portal_name)));
+						//}
 
 						if (strategy == DISPATCH_PRIMARY) {
 							break;
@@ -4500,10 +4505,11 @@ PostgresMain(int argc, char *argv[],
 							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
 							DispatchState *dstate = extendDispatch('E', &input_message);
 							dstate->stragegy = strategy;
-							if (!handleResultAndForward(dstate)) {
-								ereport(ERROR, (errmsg("fail to dispatch execute extend query %s",
-													   portal_name)));
-							}
+							execution_strategy_choice = strategy;
+							//if (!handleResultAndForward(dstate)) {
+							//	ereport(ERROR, (errmsg("fail to dispatch execute extend query %s",
+							//						   portal_name)));
+							//}
 							if (strategy == DISPATCH_PRIMARY)
 								break;
 						}
@@ -4558,6 +4564,47 @@ PostgresMain(int argc, char *argv[],
 					const char *close_target;
 
 					forbidden_in_wal_sender(firstchar);
+
+					if (USE_HIGHGO_DISPATCH)
+					{
+						int oldcur = input_message.cursor;
+						int			close_type;
+						const char *close_target;
+						DMLQueryStragegy strategy = DISPATCH_NONE;
+
+						close_type = pq_getmsgbyte(&input_message);
+						close_target = pq_getmsgstring(&input_message);
+
+						switch (close_type) {
+						case 'S':
+							/* describe_target as the statement name */
+							strategy = requireExtendBindDispatch(close_target);
+							break;
+						case 'P':
+							/* describe_target as the portal name */
+							strategy = requireExtendExecuteDispatch(close_target);
+							break;
+						default:
+							ereport(ERROR,
+									(errcode(ERRCODE_PROTOCOL_VIOLATION),
+									 errmsg("invalid DESCRIBE message subtype %d", close_type)));
+							break;
+						}
+						
+						if (strategy == DISPATCH_PRIMARY ||
+							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
+							DispatchState *dstate = extendDispatch('C', &input_message);
+							dstate->stragegy = strategy;
+							//if (!handleResultAndForward(dstate)) {
+							//	ereport(ERROR, (errmsg("fail to dispatch DESCRIBE extend query %s",
+							//						   close_target)));
+							//}
+							if (strategy == DISPATCH_PRIMARY)
+								break;
+						}
+						/* restore the cursor for workaround */
+						input_message.cursor = oldcur;
+					}
 
 					close_type = pq_getmsgbyte(&input_message);
 					close_target = pq_getmsgstring(&input_message);
@@ -4636,10 +4683,10 @@ PostgresMain(int argc, char *argv[],
 							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
 							DispatchState *dstate = extendDispatch('D', &input_message);
 							dstate->stragegy = strategy;
-							if (!handleResultAndForward(dstate)) {
-								ereport(ERROR, (errmsg("fail to dispatch DESCRIBE extend query %s",
-													   describe_target)));
-							}
+							//if (!handleResultAndForward(dstate)) {
+							//	ereport(ERROR, (errmsg("fail to dispatch DESCRIBE extend query %s",
+							//						   describe_target)));
+							//}
 							if (strategy == DISPATCH_PRIMARY)
 								break;
 						}
@@ -4670,12 +4717,51 @@ PostgresMain(int argc, char *argv[],
 				break;
 
 			case 'H':			/* flush */
+				ereport(LOG, (errmsg("-----------exec_execute_flush_message enter")));
+				if (USE_HIGHGO_DISPATCH) {
+					// will dispatch to primary and local both
+					DispatchState *dstate = extendDispatch('H', &input_message);
+					dstate->stragegy = DISPATCH_PRIMARY_AND_STANDBY;
+					if (!handleResultAndForward(dstate)) {
+						ereport(ERROR, (errmsg("fail to dispatch flush extend query")));
+					}
+				}
+				
 				pq_getmsgend(&input_message);
 				if (whereToSendOutput == DestRemote)
 					pq_flush();
 				break;
 
 			case 'S':			/* sync */
+				ereport(LOG, (errmsg("-----------exec_execute_sync_message enter")));
+				if (USE_HIGHGO_DISPATCH) {
+					// will dispatch to primary and local both
+					// use the execution strategy for sync
+					/* there is scenario having problem when strategy set the
+					   primary and standby, since the sync will trigger some
+					   response message returned, and if it is primary and
+					   standby strategy, the system cannot determine which
+					   response should be taken to response to client, although
+					   the extended query most of the time only take one single
+					   message and no need to sync both side, or even if it is
+					   a set message, both side will return same result and we
+					   take the primary result by default */
+					DMLQueryStragegy strategy = execution_strategy_choice;
+					if (strategy == DISPATCH_PRIMARY ||
+						strategy == DISPATCH_PRIMARY_AND_STANDBY) {
+						DispatchState *dstate = extendDispatch('S', &input_message);
+						dstate->stragegy = strategy;
+						if (!handleResultAndForward(dstate)) {
+							ereport(ERROR, (errmsg("fail to dispatch sync extend query")));
+						}
+					}
+					
+					if (strategy == DISPATCH_PRIMARY) {
+						send_ready_for_query = true;
+						break;
+					}
+				}
+				
 				pq_getmsgend(&input_message);
 				finish_xact_command();
 				send_ready_for_query = true;

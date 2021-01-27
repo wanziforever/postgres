@@ -6,11 +6,17 @@
 
 
 
-DMLQueryStragegy unamed_prepare_dispatched = DISPATCH_NOME;
+DMLQueryStragegy unamed_prepare_dispatched = DISPATCH_NONE;
 /* currently parse stmtname and portal name use the same hash instance */
 static HTAB *prepare_queries_plan_dispatched = NULL;
 static HTAB *prepare_queries_portal_dispatched = NULL;
 List *prepare_parsetreelist_for_dispatch = NULL; /* store generated parsetree for dispatch */
+
+/* record the extended query execution strategy for later sync strategy, since
+   sync message do not take any information for previous actions, we need to
+   know where the sync message to send, we track the previous execution command
+   as the same with sync */
+DMLQueryStragegy execution_strategy_choice = DISPATCH_NONE;
 
 static void initPrepareQueryPlanDispatch(void) {
 	HASHCTL hash_ctl;
@@ -107,12 +113,12 @@ DMLQueryStragegy fetchPrepareQueriesPlanDispatched(const char *stmt_name) {
 
 
 	if (entry == NULL) {
-		return DISPATCH_NOME;
+		return DISPATCH_NONE;
 	} else {
 		return entry->strategy;
 	}
 	
-	return DISPATCH_NOME;
+	return DISPATCH_NONE;
 }
 
 DMLQueryStragegy fetchPrepareQueriesPortalDispatched(const char *portal_name) {
@@ -127,12 +133,12 @@ DMLQueryStragegy fetchPrepareQueriesPortalDispatched(const char *portal_name) {
 	}
 
 	if (entry == NULL) {
-		return DISPATCH_NOME;
+		return DISPATCH_NONE;
 	} else {
 		return entry->strategy;
 	}
 	
-	return DISPATCH_NOME;
+	return DISPATCH_NONE;
 }
 
 
@@ -164,18 +170,23 @@ DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
 
 	conn->outCount = conn->outMsgEnd;
 
-	//int toSend = conn->outCount - (conn->outCount % 8192);
-
-	if (hgSendSome(conn, conn->outCount) < 0) {
-		ereport(ERROR,
-				(errmsg("fail to send extended dispatch message")));
-		return NULL;
+	if (conn->outCount >= 8192) {
+		int toSend = conn->outCount - (conn->outCount % 8192);
+		if (hgSendSome(conn, toSend) < 0 )
+			return NULL;
 	}
+	
 
 	if (msgtype == 'P')
 	{
 		set_dml_read_func_oids_num();
 	}
+
+	if (msgtype == 'S') {
+		hgFlush(conn);
+	}
+
+	conn->asyncStatus = PGASYNC_BUSY;
 
 	// need to delete the state instance??
 	return dstate;
