@@ -76,6 +76,8 @@ void resetConnOnError(PGconn *conn) {
 	/* it is not good to touch the global variable on the pq wrapper function
 	   for hgDropConnection(), so reset the Dispatch_Connection here.
 	   actually whether need to create a connection here is a choice. */
-	Dispatch_Connection = createDispatchConnection();
+	Dispatch_State.conn = createDispatchConnection();
 }
+
+
 

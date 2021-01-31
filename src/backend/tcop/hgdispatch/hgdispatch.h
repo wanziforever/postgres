@@ -14,7 +14,8 @@ typedef enum DMLQueryStragegy {
 	DISPATCH_NONE,
 	DISPATCH_STANDBY,
 	DISPATCH_PRIMARY,
-	DISPATCH_PRIMARY_AND_STANDBY
+	DISPATCH_PRIMARY_AND_STANDBY,
+	DISPATCH_TRANSACTION_START_REMOTE_DEFER
 } DMLQueryStragegy;
 
 typedef enum DispatchMode {
@@ -23,9 +24,23 @@ typedef enum DispatchMode {
 } DispatchMode;
 
 typedef struct {
+	DMLQueryStragegy parse;
+	DMLQueryStragegy bind;
+	DMLQueryStragegy describe;
+	DMLQueryStragegy execute;
+	DMLQueryStragegy sync;
+} ExtendQueryStrategy;
+
+typedef struct {
 	PGconn *conn;
-	DMLQueryStragegy stragegy;
+	DMLQueryStragegy strategy;
+	DMLQueryStragegy ext_strategy;
+	bool in_transaction_block;
+	bool remote_begin_been_send;
+	bool remote_begin_response_consumed;
+	int response_avoid_duplicated_consumed;
 } DispatchState;
+
 
 typedef struct {
 	char extendName[NAMEDATALEN]; // both for portal name and stmt name
@@ -37,7 +52,7 @@ PGconn* createDispatchConnection(void);
 bool primaryDispatch(Node* parsetree, const char* query_string);
 DispatchState* createDispatchState(void);
 PGconn* getCurrentDispatchConnection(void);
-DispatchState* dispatch(const char* query_string);
+bool dispatch(const char* query_string);
 DMLQueryStragegy requireDispatch(CommandTag cmdTag, RawStmt* parsetree);
 char *get_password(const char *role);
 DMLQueryStragegy requireExtendParseDispatch(const char* query_string);
@@ -46,9 +61,9 @@ DMLQueryStragegy requireExtendExecuteDispatch(const char* portal_name);
 DMLQueryStragegy fetchPrepareQueriesPlanDispatched(const char *stmt_name);
 DMLQueryStragegy fetchPrepareQueriesPortalDispatched(const char *portal_name);
 void storePrepareQueriesDispatched(const char *stmt_name, DMLQueryStragegy s);
-DispatchState* extendDispatch(char msgtype, StringInfo input_message);
-void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only);
-bool handleResultAndForward(DispatchState *dstate);
+bool extendDispatch(char msgtype, StringInfo input_message);
+int dispatchInputParseAndSend(PGconn *conn, int* ignore_msg_num);
+bool handleResultAndForward(void);
 void handleHgSyncloss(PGconn *conn, char id, int msgLength);
 void dropUnnamedPrepareDispatch(void);
 
@@ -62,3 +77,5 @@ extern DispatchMode dispatch_check_scope;
 
 #define MAX_DIRTY_OIDS 50
 extern bool enable_dml_dispatch;
+extern DispatchState Dispatch_State;
+extern DispatchState *hgdstate;

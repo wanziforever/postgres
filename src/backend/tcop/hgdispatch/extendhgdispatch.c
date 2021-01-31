@@ -4,7 +4,7 @@
 #include "libpq-int.h"
 #include "hgdispatch.h"
 
-
+extern bool checkConnection(void);
 
 DMLQueryStragegy unamed_prepare_dispatched = DISPATCH_NONE;
 /* currently parse stmtname and portal name use the same hash instance */
@@ -17,6 +17,7 @@ List *prepare_parsetreelist_for_dispatch = NULL; /* store generated parsetree fo
    know where the sync message to send, we track the previous execution command
    as the same with sync */
 DMLQueryStragegy execution_strategy_choice = DISPATCH_NONE;
+DMLQueryStragegy describe_strategy_choice = DISPATCH_NONE;
 
 static void initPrepareQueryPlanDispatch(void) {
 	HASHCTL hash_ctl;
@@ -70,11 +71,11 @@ void storePrepareQueriesPlanDispatched(const char *stmt_name, DMLQueryStragegy s
 												  HASH_ENTER,
 												  &found);
 
-	if (found) {
-		ereport(WARNING,
-				(errcode(ERRCODE_DUPLICATE_PSTATEMENT),
-				 errmsg("prepared statement dispatch \"%s\" already exits", stmt_name)));
-	}
+	//if (found) {
+	//	ereport(WARNING,
+	//			(errcode(ERRCODE_DUPLICATE_PSTATEMENT),
+	//			 errmsg("prepared statement dispatch \"%s\" already exits", stmt_name)));
+	//}
 	entry->strategy = s;
 }
 
@@ -91,11 +92,11 @@ void storePrepareQueriesPortalDispatched(const char *portal_name, DMLQueryStrage
 												  HASH_ENTER,
 												  &found);
 
-	if (found) {
-		ereport(WARNING,
-				(errcode(ERRCODE_DUPLICATE_PSTATEMENT),
-				 errmsg("prepared portal dispatch \"%s\" already exits", portal_name)));
-	}
+	//if (found) {
+	//	ereport(WARNING,
+	//			(errcode(ERRCODE_DUPLICATE_PSTATEMENT),
+	//			 errmsg("prepared portal dispatch \"%s\" already exits", portal_name)));
+	//}
 	entry->strategy = s;
 
 }
@@ -142,7 +143,7 @@ DMLQueryStragegy fetchPrepareQueriesPortalDispatched(const char *portal_name) {
 }
 
 
-DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
+bool extendDispatch(char msgtype, StringInfo input_message) {
 	// for simple, without parse the input message and setup the repare message
 	// again, i use the input mesage from standby client directly operate on the
 	// connction outBuffer directly. but refer to the pqPutMsgStart and
@@ -152,8 +153,9 @@ DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
 	// one is used for client, and the other is used for send message beck to
 	// client, hg_putbytes is belongs to the later one.
 
-	DispatchState *dstate = createDispatchState();
-	PGconn *conn = dstate->conn;
+	checkConnection();
+
+	PGconn *conn = Dispatch_State.conn;
 	
 	conn->outBuffer[conn->outCount] = msgtype;
 	conn->outMsgEnd = conn->outCount + 1;
@@ -189,5 +191,64 @@ DispatchState* extendDispatch(char msgtype, StringInfo input_message) {
 	conn->asyncStatus = PGASYNC_BUSY;
 
 	// need to delete the state instance??
-	return dstate;
+	return true;
+}
+
+// consider to support a given statement name from caller
+bool sendDeferTransactionBlockStart(void) {
+	//construct a simple begin P/B/E message
+
+	checkConnection();
+	
+	char buf[64] = {'\0'};
+	int pos = 0;
+	uint32 len = 0;
+	uint32 u32 = 0;
+
+	// parse message
+	buf[pos] = 'P';
+	pos += 1;
+	u32 = pg_hton32(13);
+	memcpy(buf+pos, &u32, 4);
+	// empty statement name, and length(4)
+	pos += 5;
+	memcpy(buf+pos, "BEGIN", 5);
+	pos += 6;
+	// two empty parameters
+	pos += 2;
+
+	// bind message
+	buf[pos] = 'B';
+	pos += 1;
+	u32 = pg_hton32(12);
+	memcpy(buf+pos, &u32, 4);
+	// empty for everything
+	pos += 12;
+
+	// execute message
+	buf[pos] = 'E';
+	pos += 1;
+	u32 = pg_hton32(9);
+	memcpy(buf+pos, &u32, 4);
+	// empty for everything
+	pos += 9;
+
+	len = pos;
+
+	PGconn *conn = Dispatch_State.conn;
+	conn->outMsgEnd = conn->outCount;
+	memcpy(conn->outBuffer + conn->outMsgEnd, buf, len);
+
+	conn->outMsgEnd += len;
+	
+	conn->outCount = conn->outMsgEnd;
+
+	if (conn->outCount >= 8192) {
+		int toSend = conn->outCount - (conn->outCount % 8192);
+		if (hgSendSome(conn, toSend) < 0 )
+			return NULL;
+	}
+
+	conn->asyncStatus = PGASYNC_BUSY;
+	
 }

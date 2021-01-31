@@ -86,6 +86,7 @@
 #include "hgdispatch/hgdispatch_utility.h"
 extern List *prepare_parsetreelist_for_dispatch;
 extern DMLQueryStragegy execution_strategy_choice;
+extern DMLQueryStragegy describe_strategy_choice;
 
 /* ----------------
  *		global variables
@@ -1095,10 +1096,11 @@ exec_simple_query(const char *query_string)
 		if (USE_HIGHGO_DISPATCH) {
 			// highgo dispatch work, DISPATCH_NONE still will not dispatch
 			DMLQueryStragegy strategy = requireDispatch(commandTag, parsetree);
+			Dispatch_State.strategy = strategy;
+
 			if (strategy == DISPATCH_PRIMARY || strategy == DISPATCH_PRIMARY_AND_STANDBY) {
-				DispatchState *dstate = dispatch(query_string);
-				dstate->stragegy = strategy;
-				if (!handleResultAndForward(dstate))
+				dispatch(query_string);
+				if (!handleResultAndForward())
 					ereport(ERROR, (errmsg("fail to dispatch query %s", query_string)));
 			}
 
@@ -1373,7 +1375,6 @@ exec_parse_message(const char *query_string,	/* string to execute */
 				   int numParams)	/* number of parameters */
 	
 {
-	ereport(LOG, (errmsg("-----------exec_parse_message enter")));
 	MemoryContext unnamed_stmt_context = NULL;
 	MemoryContext oldcontext;
 	List	   *parsetree_list;
@@ -1449,15 +1450,17 @@ exec_parse_message(const char *query_string,	/* string to execute */
 	   when doing dispatch check, and to avoid the duplicated parse work, the
 	   former parsetree lsit will be stored to a global variable, so just check
 	   it before doing parse again */
-	if (prepare_parsetreelist_for_dispatch == NULL) {
-		parsetree_list = pg_parse_query(query_string);
-	} else {
-		parsetree_list = prepare_parsetreelist_for_dispatch;
-		/* prepare_parsetreelist_for_dispatch only used
-		   for avoid double parse work, after doing parse
-		   just set it to NULL */
-		prepare_parsetreelist_for_dispatch = NULL; 
-	}
+	//if (prepare_parsetreelist_for_dispatch == NULL) {
+	//	parsetree_list = pg_parse_query(query_string);
+	//} else {
+	//	parsetree_list = prepare_parsetreelist_for_dispatch;
+	//	/* prepare_parsetreelist_for_dispatch only used
+	//	   for avoid double parse work, after doing parse
+	//	   just set it to NULL */
+	//	prepare_parsetreelist_for_dispatch = NULL; 
+	//}
+
+	parsetree_list = pg_parse_query(query_string);
 
 	/*
 	 * We only allow a single user statement in a prepared statement. This is
@@ -1641,7 +1644,6 @@ exec_parse_message(const char *query_string,	/* string to execute */
 static void
 exec_bind_message(StringInfo input_message)
 {
-	ereport(LOG, (errmsg("-----------exec_bind_message enter")));
 	const char *portal_name;
 	const char *stmt_name;
 	int			numPFormats;
@@ -1758,7 +1760,6 @@ exec_bind_message(StringInfo input_message)
 	 * Create the portal.  Allow silent replacement of an existing portal only
 	 * if the unnamed portal is specified.
 	 */
-
 	if (portal_name[0] == '\0')
 		portal = CreatePortal(portal_name, true, true);
 	else
@@ -1973,6 +1974,7 @@ exec_bind_message(StringInfo input_message)
 	else
 		params = NULL;
 
+
 	/* Done storing stuff in portal's context */
 	MemoryContextSwitchTo(oldContext);
 
@@ -1984,6 +1986,7 @@ exec_bind_message(StringInfo input_message)
 	params_errcxt.arg = (void *) &params_data;
 	error_context_stack = &params_errcxt;
 
+	
 	/* Get the result format codes */
 	numRFormats = pq_getmsgint(input_message, 2);
 	if (numRFormats > 0)
@@ -2078,8 +2081,6 @@ exec_bind_message(StringInfo input_message)
 static void
 exec_execute_message(const char *portal_name, long max_rows)
 {
-
-	ereport(LOG, (errmsg("-----------exec_execute_message enter")));
 
 	CommandDest dest;
 	DestReceiver *receiver;
@@ -2528,7 +2529,6 @@ errdetail_recovery_conflict(void)
 static void
 exec_describe_statement_message(const char *stmt_name)
 {
-	ereport(LOG, (errmsg("-----------exec_describe_statement__message enter")));
 	CachedPlanSource *psrc;
 
 	/*
@@ -2624,7 +2624,6 @@ exec_describe_statement_message(const char *stmt_name)
 static void
 exec_describe_portal_message(const char *portal_name)
 {
-	ereport(LOG, (errmsg("-----------exec_describe_portal_message enter")));
 	Portal		portal;
 
 	/*
@@ -4408,21 +4407,32 @@ PostgresMain(int argc, char *argv[],
 
 						dropUnnamedPrepareDispatch();
 						DMLQueryStragegy strategy = requireExtendParseDispatch(query_string);
-
-						ereport(LOG, (errmsg("---parse----%d  %s", strategy, query_string)));
+						hgdstate->ext_strategy = strategy;
 						storePrepareQueriesPlanDispatched(stmt_name, strategy);
+						
 						if (strategy == DISPATCH_PRIMARY ||
 							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
-							DispatchState *dstate = extendDispatch('P', &input_message);
-							dstate->stragegy = strategy;
+							if (hgdstate->in_transaction_block && !hgdstate->remote_begin_been_send) {
+								// consider to add record the begin message parse stmtname, and send it to remote
+								/* here has a case that only parse for a update
+								   sql send , but no execution, but we will still
+								   dispatch the begin message */
+								sendDeferTransactionBlockStart();
+								Dispatch_State.remote_begin_been_send = true;
+								Dispatch_State.response_avoid_duplicated_consumed+=1;
+							}
+							extendDispatch('P', &input_message);
+
 							//if (!handleResultAndForward(dstate))
 							//	ereport(ERROR, (errmsg("fail to dispatch parse extend query %s",
 							//						   query_string)));
 							/* it is primary only dispatch, so break the switch
 							   without running the statement locally */
-							if (strategy == DISPATCH_PRIMARY)
-								break;
 						}
+
+						
+						if (strategy == DISPATCH_PRIMARY)
+							break;
 						input_message.cursor = oldcur;
 					}
 					
@@ -4461,8 +4471,7 @@ PostgresMain(int argc, char *argv[],
 					storePrepareQueriesPortalDispatched(portal_name, strategy);
 					if (strategy == DISPATCH_PRIMARY ||
 						strategy == DISPATCH_PRIMARY_AND_STANDBY) {
-						DispatchState *dstate = extendDispatch('B', &input_message);
-						dstate->stragegy = strategy;
+						extendDispatch('B', &input_message);
 						//if (!handleResultAndForward(dstate)) {
 						//	ereport(ERROR, (errmsg("fail to dispatch bind %s",
 						//						   portal_name)));
@@ -4501,17 +4510,23 @@ PostgresMain(int argc, char *argv[],
 						portal_name = pq_getmsgstring(&input_message);
 
 						DMLQueryStragegy strategy = requireExtendExecuteDispatch(portal_name);
+						execution_strategy_choice = strategy;
 						if (strategy == DISPATCH_PRIMARY ||
 							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
-							DispatchState *dstate = extendDispatch('E', &input_message);
-							dstate->stragegy = strategy;
-							execution_strategy_choice = strategy;
+							extendDispatch('E', &input_message);
+
 							//if (!handleResultAndForward(dstate)) {
 							//	ereport(ERROR, (errmsg("fail to dispatch execute extend query %s",
 							//						   portal_name)));
 							//}
 							if (strategy == DISPATCH_PRIMARY)
 								break;
+						}
+
+						/* meet the transaction begin, remote transaction
+						   message need to be defer */
+						if (strategy == DISPATCH_TRANSACTION_START_REMOTE_DEFER) {
+							hgdstate->in_transaction_block = true;
 						}
 						/* restore the cursor for workaround */
 						input_message.cursor = oldcur;
@@ -4590,11 +4605,11 @@ PostgresMain(int argc, char *argv[],
 									 errmsg("invalid DESCRIBE message subtype %d", close_type)));
 							break;
 						}
+
 						
 						if (strategy == DISPATCH_PRIMARY ||
 							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
-							DispatchState *dstate = extendDispatch('C', &input_message);
-							dstate->stragegy = strategy;
+							extendDispatch('C', &input_message);
 							//if (!handleResultAndForward(dstate)) {
 							//	ereport(ERROR, (errmsg("fail to dispatch DESCRIBE extend query %s",
 							//						   close_target)));
@@ -4678,11 +4693,12 @@ PostgresMain(int argc, char *argv[],
 									 errmsg("invalid DESCRIBE message subtype %d", describe_type)));
 							break;
 						}
+
+						describe_strategy_choice = strategy;
 						
 						if (strategy == DISPATCH_PRIMARY ||
 							strategy == DISPATCH_PRIMARY_AND_STANDBY) {
-							DispatchState *dstate = extendDispatch('D', &input_message);
-							dstate->stragegy = strategy;
+							extendDispatch('D', &input_message);
 							//if (!handleResultAndForward(dstate)) {
 							//	ereport(ERROR, (errmsg("fail to dispatch DESCRIBE extend query %s",
 							//						   describe_target)));
@@ -4717,12 +4733,11 @@ PostgresMain(int argc, char *argv[],
 				break;
 
 			case 'H':			/* flush */
-				ereport(LOG, (errmsg("-----------exec_execute_flush_message enter")));
 				if (USE_HIGHGO_DISPATCH) {
 					// will dispatch to primary and local both
-					DispatchState *dstate = extendDispatch('H', &input_message);
-					dstate->stragegy = DISPATCH_PRIMARY_AND_STANDBY;
-					if (!handleResultAndForward(dstate)) {
+					extendDispatch('H', &input_message);
+
+					if (!handleResultAndForward()) {
 						ereport(ERROR, (errmsg("fail to dispatch flush extend query")));
 					}
 				}
@@ -4733,7 +4748,6 @@ PostgresMain(int argc, char *argv[],
 				break;
 
 			case 'S':			/* sync */
-				ereport(LOG, (errmsg("-----------exec_execute_sync_message enter")));
 				if (USE_HIGHGO_DISPATCH) {
 					// will dispatch to primary and local both
 					// use the execution strategy for sync
@@ -4745,18 +4759,45 @@ PostgresMain(int argc, char *argv[],
 					   the extended query most of the time only take one single
 					   message and no need to sync both side, or even if it is
 					   a set message, both side will return same result and we
-					   take the primary result by default */
-					DMLQueryStragegy strategy = execution_strategy_choice;
+					   take the primary result by default
+					   sometimes, there is PDS, somethings there is PBES, so we need
+					   to consider both the D and E operation
+					*/
+					DMLQueryStragegy strategy = DISPATCH_NONE;
+					if (describe_strategy_choice != DISPATCH_NONE)
+						strategy = describe_strategy_choice;
+
+					if (execution_strategy_choice != DISPATCH_NONE)
+						strategy = execution_strategy_choice;
+
+
+					if (strategy == DISPATCH_PRIMARY_AND_STANDBY) {
+						hgdstate->response_avoid_duplicated_consumed++;
+					}
 					if (strategy == DISPATCH_PRIMARY ||
 						strategy == DISPATCH_PRIMARY_AND_STANDBY) {
-						DispatchState *dstate = extendDispatch('S', &input_message);
-						dstate->stragegy = strategy;
-						if (!handleResultAndForward(dstate)) {
+						extendDispatch('S', &input_message);
+						if (!handleResultAndForward()) {
 							ereport(ERROR, (errmsg("fail to dispatch sync extend query")));
 						}
 					}
+					/* although we add a ignore duplicated message here, but if it is
+					   primary and standby only P/B, without a C return code, the logic
+					   will have problems */
+					
+
+					execution_strategy_choice = DISPATCH_NONE;
+					describe_strategy_choice = DISPATCH_NONE;
+					hgdstate->response_avoid_duplicated_consumed = 0;
+					Dispatch_State.in_transaction_block = false;
+					Dispatch_State.remote_begin_been_send = false;
 					
 					if (strategy == DISPATCH_PRIMARY) {
+						/* restore the send ready 'Z' command at the end of the
+						   processing, the dispatch code did not flush the sending
+						   buffer till sending ready flag which is the normal logic.
+						   this is to insure the message to send in one batch of
+						   buffer, for example, 1/2/T/D/C/Z, not 1/2/T/D/C -> Z*/
 						send_ready_for_query = true;
 						break;
 					}

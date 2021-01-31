@@ -7,6 +7,10 @@
 bool enable_dml_dispatch = false;
 //DispatchMode dispatch_check_scope = DISPATCH_SESSION;
 DispatchMode dispatch_check_scope = DISPATCH_TRANSACTION;
+extern DMLQueryStragegy execution_strategy_choice;
+
+DispatchState Dispatch_State;
+DispatchState *hgdstate = &Dispatch_State;
 
 #define BUFFER_LEN 4096
 #define offsetof(type, field) ((unsigned long)&(((type *)0)->field))
@@ -28,7 +32,7 @@ DispatchMode dispatch_check_scope = DISPATCH_TRANSACTION;
 
 
 bool am_dml_dispatch = false;
-
+bool checkConnection(void);
 
 DispatchState* createDispatchState(void) {
 	DispatchState *st = palloc(sizeof(DispatchState));
@@ -52,7 +56,7 @@ int remote_exec(PGconn *conn, char *query_string) {
 }
 
 
-DispatchState* dispatch(const char* query_string) {
+bool dispatch(const char* query_string) {
 	// need to pay attention to free the DispatchState instance
 	int retrycount = 0;
 	int n = 0;
@@ -61,8 +65,8 @@ DispatchState* dispatch(const char* query_string) {
 	do {
 		/* some time the connection will have problems, and we need to retry
 		   the message send */
-		dstate = createDispatchState();
-		n = remote_exec(dstate->conn, query_string);
+		checkConnection();
+		n = remote_exec(Dispatch_State.conn, query_string);
 		if (n <= 0) { // the PQsendQuery will return 0 for pqFlush error
 			retrycount++;
 			if (retrycount >= MAX_DISPATCH_RETRY) {
@@ -80,17 +84,18 @@ DispatchState* dispatch(const char* query_string) {
 
 	//ereport(LOG, (errmsg("after pqexec")));
 	// need to delete the state instance??
-	return dstate;
+	return true;
 }
 
-bool handleResultAndForward(DispatchState *dstate) {
-	PGconn *conn = dstate->conn;
-
+bool handleResultAndForward(void) {
+	PGconn *conn = Dispatch_State.conn;
+	int msghandled = 0;
 	bool consume_message_only = false;
-	consume_message_only = dstate->stragegy == DISPATCH_PRIMARY_AND_STANDBY ? true:false;
-	ereport(LOG, (errmsg("first call to dispatchInputParseAndSend with asyncStatus is %d", conn->asyncStatus)));
-	dispatchInputParseAndSend(dstate->conn, consume_message_only);
-	hg_raw_flush();
+	;
+	msghandled = dispatchInputParseAndSend(conn, &hgdstate->response_avoid_duplicated_consumed);
+
+
+	//hg_raw_flush();
 	
 	while (conn->asyncStatus == PGASYNC_BUSY) {
 		int flushResult;
@@ -111,9 +116,8 @@ bool handleResultAndForward(DispatchState *dstate) {
 					 errmsg("fail to handle the connection for dispatch")));
 			return false;
 		}
-		ereport(LOG, (errmsg("second call to dispatchInputParseAndSend")));
-		dispatchInputParseAndSend(dstate->conn, consume_message_only);
-		hg_raw_flush();
+		dispatchInputParseAndSend(conn, &hgdstate->response_avoid_duplicated_consumed);
+		//hg_raw_flush();
 	}
 
 	switch (conn->asyncStatus) {
@@ -121,7 +125,7 @@ bool handleResultAndForward(DispatchState *dstate) {
 		break;
 	case PGASYNC_READY:
 		// try to get the Z command
-		dispatchInputParseAndSend(conn, consume_message_only);
+		dispatchInputParseAndSend(conn, &hgdstate->response_avoid_duplicated_consumed);
 		break;
 	default:
 		ereport(ERROR,
@@ -139,22 +143,22 @@ void handleHgSyncloss(PGconn *conn, char id, int msgLength) {
 }
 
 
-void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
+int dispatchInputParseAndSend(PGconn *conn, int* ignore_msg_num) {
 	// only check the parameers which is usefull for dispatch private
 	char id;
 	int msgLength;
 	int avail;
-	ereport(LOG, (errmsg("-----dispatchInputParseAndSend enter with consume_message_only %d", consume_message_only)));
+
+	int msghandled = 0;
 	
 	for (;;) {
 		conn->inCursor = conn->inStart;
 		if (hgGetc(&id, conn)) {
-			ereport(LOG, (errmsg("getc fail")));
-			return;
+			return msghandled;
 		}
 		if (hgGetInt(&msgLength, 4, conn)) {
 			ereport(LOG, (errmsg("getInt fail")));
-			return;
+			return msghandled;
 		}
 
 		/*
@@ -165,12 +169,12 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 		if (msgLength < 4)
 		{
 			handleHgSyncloss(conn, id, msgLength);
-			return;
+			return msghandled;
 		}
 		if (msgLength > 30000 && !VALID_LONG_MESSAGE_TYPE(id))
 		{
 			handleHgSyncloss(conn, id, msgLength);
-			return;
+			return msghandled;
 		}
 
 		/*
@@ -200,7 +204,7 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 				handleHgSyncloss(conn, id, msgLength);
 			}
 			ereport(LOG, (errmsg("fail for avail")));
-			return;
+			return msghandled;
 		}
 		
 		// do something
@@ -211,6 +215,7 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 		switch (id) {
 		case 'C':
 			conn->asyncStatus = PGASYNC_READY;
+			msghandled++;
 			break;
 		case 'Z':
 			conn->asyncStatus = PGASYNC_IDLE;
@@ -251,18 +256,25 @@ void dispatchInputParseAndSend(PGconn *conn, bool consume_message_only) {
 			;
 		}
 
-		ereport(LOG, (errmsg("----------------meet the response id %c", id)));
-
 		conn->inCursor += msgLength;
 		
 		// ignore the Z, becasue the standby logic will send a Z still
-		if (!consume_message_only && id != 'Z' && id != 'O') {
-			ereport(LOG, (errmsg("---------going to send bytes")));
+		if (*ignore_msg_num <= 0 && id != 'Z' && id != 'O') {
 			hg_raw_putbytes(conn->inBuffer + conn->inStart, msgLength+5);
+		}
+
+		if (id == 'C' && *ignore_msg_num > 0) {
+			(*ignore_msg_num)--;
 		}
 		
 		conn->inStart = conn->inCursor;
 	}
-	
+
+	return msghandled;
 }
 
+bool checkConnection(void) {
+	if (Dispatch_State.conn == NULL) {
+		Dispatch_State.conn = getCurrentDispatchConnection();
+	}
+}

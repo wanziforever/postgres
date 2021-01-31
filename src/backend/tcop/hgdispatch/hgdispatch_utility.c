@@ -267,6 +267,7 @@ DMLQueryStragegy requireDispatch(CommandTag cmdTag, RawStmt* parsetree) {
 		/* following for transaction tags */
 	case CMDTAG_BEGIN:
 	case CMDTAG_START_TRANSACTION:
+		return DISPATCH_TRANSACTION_START_REMOTE_DEFER;
 	case CMDTAG_COMMIT:
 	case CMDTAG_ROLLBACK:
 	case CMDTAG_SAVEPOINT:
@@ -425,3 +426,5 @@ uint64 getHgGetCurrentLocalSeconds(void) {
 	int64 secs = tp.tv_sec;
 	return secs;
 }
+
+
