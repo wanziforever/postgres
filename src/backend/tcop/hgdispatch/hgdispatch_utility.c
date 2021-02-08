@@ -18,8 +18,9 @@ extern uint64 timeout_interval;
 char*  dml_write_list = NULL;
 char*  dml_read_list = NULL;
 //Store oids touched by read functions
+#define MAX_READ_FUNC_OIDS_LEN	64
 int    dml_read_func_oids_num = 0;
-Oid    dml_read_func_oids[64] = {0};
+Oid    dml_read_func_oids[MAX_READ_FUNC_OIDS_LEN] = {0};
 
 static char* is_func_in_list(FuncCall* node, char* list)
 {
@@ -153,8 +154,16 @@ bool further_check_select_semantics(Node *node) {
 	case T_FuncCall:
 		if (is_func_in_write_list((FuncCall*)node, dml_write_list) != NULL)	
 			return true;
+
+		//save the oids to dml_read_func_oids array, then loop it to see if it is in the dirty list
 		extract_read_table_oids((FuncCall*)node);
-		
+		for (int i=0; i<dml_read_func_oids_num; i++)
+		{
+			if (examineDirtyOid(dml_read_func_oids[i]))
+				return true;
+		}
+
+		return false;
 		
 //		if ((fwd_white_list == NULL) || (0 == *fwd_white_list))
 //		{
