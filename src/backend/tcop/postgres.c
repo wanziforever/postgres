@@ -1093,7 +1093,7 @@ exec_simple_query(const char *query_string)
 
 		set_ps_display(GetCommandTagName(commandTag));
 
-		if (USE_HIGHGO_DISPATCH) {
+		if (USE_HIGHGO_DISPATCH && list_length(parsetree_list) == 1) {
 			// highgo dispatch work, DISPATCH_NONE still will not dispatch
 			DMLQueryStragegy strategy = requireDispatch(commandTag, parsetree);
 			Dispatch_State.strategy = strategy;
@@ -1177,6 +1177,19 @@ exec_simple_query(const char *query_string)
 
 		querytree_list = pg_analyze_and_rewrite(parsetree, query_string,
 												NULL, 0, NULL);
+
+		if (USE_HIGHGO_DISPATCH && list_length(parsetree_list) == 1) {
+			// here for view dispatch check only
+			DMLQueryStragegy strategy = checkViewRequire(querytree_list);
+			Dispatch_State.strategy = strategy;
+			// only support primary and local, will not support both primary and standby here
+			if (strategy == DISPATCH_PRIMARY) {
+				dispatch(query_string);
+				if (!handleResultAndForward())
+					ereport(ERROR, (errmsg("fail to dispatch query %s", query_string)));
+				continue;
+			}
+		}
 
 		plantree_list = pg_plan_queries(querytree_list, query_string,
 										CURSOR_OPT_PARALLEL_OK, NULL);

@@ -3,6 +3,7 @@
 #include "libpq-fe.h"
 #include "libpq/libpq-be.h"
 #include "libpq/crypt.h"
+#include "parser/parsetree.h"
 #include "common/md5.h"
 #include "tcop/utility.h"
 #include "replication/walreceiver.h"
@@ -428,3 +429,48 @@ uint64 getHgGetCurrentLocalSeconds(void) {
 }
 
 
+bool queryCheckDirtyOidWalker(Query *query) {
+	int rt_index = 0;
+
+	while (rt_index < list_length(query->rtable)) {
+		RangeTblEntry *rte = rt_fetch(++rt_index, query->rtable);
+		switch (rte->rtekind) {
+		case RTE_RELATION:
+		{
+			if (examineDirtyOid(rte->relid))
+				return true;
+		}
+		break;
+		case RTE_SUBQUERY:
+		{
+			if (queryCheckDirtyOidWalker(rte->subquery))
+				return true;
+		}
+		break;	
+		default:
+			break;
+		}
+	}
+
+	return false;
+}
+
+/* recheck the view related staff
+   only will 
+ */
+
+DMLQueryStragegy checkViewRequire(List *querytree_list) {
+	/* will not check the query except the select  */
+	ListCell *query_list;
+	foreach (query_list, querytree_list) {
+		Query *query = lfirst_node(Query, query_list);
+	
+		if (query->commandType != CMD_SELECT)
+			return DISPATCH_STANDBY;
+		
+		if (queryCheckDirtyOidWalker(query))
+			return DISPATCH_PRIMARY;
+	}
+
+	return DISPATCH_STANDBY;
+}
