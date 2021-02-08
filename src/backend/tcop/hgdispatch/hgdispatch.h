@@ -35,7 +35,8 @@ typedef struct {
 	PGconn *conn;
 	DMLQueryStragegy strategy;
 	DMLQueryStragegy ext_strategy;
-	bool in_transaction_block;
+	bool simple_begin_defer; // used for simple query
+	bool in_transaction_block; // used for extention block, true or false update coorespondingly
 	bool remote_begin_been_send;
 	bool remote_begin_response_consumed;
 	int response_avoid_duplicated_consumed;

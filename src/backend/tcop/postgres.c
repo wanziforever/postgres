@@ -1099,9 +1099,20 @@ exec_simple_query(const char *query_string)
 			Dispatch_State.strategy = strategy;
 
 			if (strategy == DISPATCH_PRIMARY || strategy == DISPATCH_PRIMARY_AND_STANDBY) {
+				if (hgdstate->simple_begin_defer) {
+					dispatch("begin;");
+					if (!handleResultAndForward())
+						ereport(ERROR, (errmsg("fail to dispatch query %s", query_string)));
+					hgdstate->simple_begin_defer = false;
+				}
+				
 				dispatch(query_string);
 				if (!handleResultAndForward())
 					ereport(ERROR, (errmsg("fail to dispatch query %s", query_string)));
+			}
+
+			if (strategy == DISPATCH_TRANSACTION_START_REMOTE_DEFER) {
+				hgdstate->simple_begin_defer = true;
 			}
 
 			if (strategy == DISPATCH_PRIMARY)
