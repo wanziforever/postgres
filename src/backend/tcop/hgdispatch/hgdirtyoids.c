@@ -1,29 +1,44 @@
 #include "postgres.h"
+#include "utils/hsearch.h"
 #include "hgdispatch.h"
 
-/* both primary and standby side will use this buffers for dirty oids, but the
-   usage may be different, primary host will use the buffer to hold found dirty oids
-   standby host will get the dirty oids data from message, and compare the touched
-   tables for select statement
+/* dirty oid management function will be different on primary and standby end,
+   each side consider the its own data managment requirement, the array is easy
+   to go through and cleanup, and hash structure is easy to search, and dynamicly
+   increase the storage size
+
+   normally the hash structure data will use the process top level memorycontext
+   so it can remain there when every the query status.
 */
 
-/* give a limitation dirty oid number, the too many dirty */
+/* used for primary end, easy to maintain and fast to loop all the oid, since
+   primary side code has ability to go through to all the dirty oids, and clean
+   all of them, give a limitation dirty oid number, the too many dirty */
 static Oid dirtyOids[MAX_DIRTY_OIDS];
 static int64 dirtyTimestamp[MAX_DIRTY_OIDS];
 static int dirtyOidNum = 0;
 
-uint64 dirty_oid_timeout_interval = 10; // seconds
-
 int findDispatchDirtyOid(Oid oid);
 
-/* if there are many oids, consider to use a binary search */
-bool addDispatchDirtyOid(Oid oid, uint64 ts) {
-	int i = -1;
-	if ((i = findDispatchDirtyOid(oid)) >= 0) {
-		dirtyOids[i] = ts;
-		return true;
-	}
-	
+/* hash table structure used for backup end, since the backend side code only
+   need to look up the one or some specified oid */
+static HTAB *dirtyoid_store = NULL;
+
+uint64 dirty_oid_timeout_interval = 10; // seconds
+
+typedef struct {
+	Oid oid;
+	uint64 ts;
+} DirtyOidHashEntry;
+
+
+// code for primary side for dirty oid maintan
+// there is no requirement logic to delete specific oid 
+bool appendDispatchDirtyOid(Oid oid, uint64 ts) {
+	/* the function will not consider the duplicated case, since it is used for
+	   primary side dirty oid, and there are not much duplicated oid happend in
+	   a SQL execution context, although the duplicated oid will handled by
+	   standby side hash structure. */
 	if (dirtyOidNum >= MAX_DIRTY_OIDS) {
 		return false;
 	}
@@ -35,16 +50,6 @@ bool addDispatchDirtyOid(Oid oid, uint64 ts) {
 	showAllDirtyOids();
 	
 	return true;
-}
-
-/* only return the index of the interval arary */
-int findDispatchDirtyOid(Oid oid) {
-	int i = 0;
-	for (; i < dirtyOidNum; i++) {
-		if (oid == dirtyOids[i]) 
-			return i;
-	}
-	return -1;
 }
 
 void cleanupDispatchDirtyOids(void) {
@@ -82,24 +87,58 @@ void showAllDirtyOids(void) {
 	}
 }
 
-/* there is no requirement logic to delete specific oid  */
+// code for standby side 
+static void initDirtyOidStore() {
+	HASHCTL hash_ctl;
+	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
+
+	hash_ctl.keysize = sizeof(Oid);
+	hash_ctl.entrysize = sizeof(DirtyOidHashEntry);
+	dirtyoid_store = hash_create("Dirty Oid Store",
+								 100,
+								 &hash_ctl,
+								 HASH_ELEM | HASH_BLOBS);
+}
+
+bool markDispatchDirtyOid(Oid oid, uint64 ts) {
+	DirtyOidHashEntry* entry;
+	bool found;
+	
+	if (!dirtyoid_store)
+		initDirtyOidStore();
+
+	entry = (DirtyOidHashEntry*) hash_search(dirtyoid_store,
+											 &oid,
+											 HASH_ENTER,
+											 &found);
+	entry->ts = ts;
+	return true;
+}
 
 /*
   return false for oid is not in dirty list or has already timeout
          true for oid is taking effect
  */
 bool examineDirtyOid(Oid oid) {
-	int i = -1;
-	if ((i = findDispatchDirtyOid(oid)) == -1) {
+	uint64 curts = getHgGetCurrentLocalSeconds();
+	DirtyOidHashEntry* entry = NULL;
+
+	if (!dirtyoid_store)
+		return false;
+
+	entry = (DirtyOidHashEntry*) hash_search(dirtyoid_store,
+											 &oid,
+											 HASH_FIND,
+											 NULL);
+
+	if (!entry) {
 		return false;
 	}
-
-	uint64 curts = getHgGetCurrentLocalSeconds();
-	if (dirtyTimestamp[i] + dirty_oid_timeout_interval > curts) {
-		//ereport(LOG, (errmsg("examineDirtyOid find the request oid, and it is not timeout (%d, %d)", curts, dirtyTimestamp[i])));
+	
+	if (entry->ts + dirty_oid_timeout_interval > curts) {
 		return true;
 	}
 
-	//ereport(LOG, (errmsg("examineDirtyOid find the request oid, and it is timeout (%d, %d)", curts, dirtyTimestamp[i])));
 	return false;
 }
+

@@ -71,6 +71,8 @@ void showAllDirtyOids(void);
 uint64 getHgGetCurrentLocalSeconds(void);
 bool examineDirtyOid(Oid oidl);
 
+bool appendDispatchDirtyOid(Oid oid, uint64 ts);
+
 extern bool am_dml_dispatch;
 extern bool enable_dml_dispatch;
 extern DispatchMode dispatch_check_scope;

@@ -42,6 +42,7 @@ int dispatchInputParseAndSend(PGconn *conn, bool consume_message_only);
 bool handleResultAndForward(void);
 void handleHgSyncloss(PGconn *conn, char id, int msgLength);
 void dropUnnamedPrepareDispatch(void);
+bool appendDispatchDirtyOid(Oid oid, uint64 ts);
 
 #define MAX_DIRTY_OIDS 100
 

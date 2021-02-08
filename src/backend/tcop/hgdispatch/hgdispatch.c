@@ -246,7 +246,7 @@ int dispatchInputParseAndSend(PGconn *conn, int* ignore_msg_num) {
 				   scenario, the return value always to be small most of the time.
 				*/
 				int64 myts = getHgGetCurrentLocalSeconds();
-				addDispatchDirtyOid(oid, myts);
+				markDispatchDirtyOid(oid, myts);
 			}
 
 			break;

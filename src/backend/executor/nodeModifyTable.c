@@ -2364,7 +2364,7 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 	   there is data indeed change, and add the oid to dispatch dirty oid list.
 	*/
 	if (enable_dml_dispatch)
-		addDispatchDirtyOid(resultRelInfo->ri_RelationDesc->rd_id, GetCurrentTimestamp());
+		appendDispatchDirtyOid(resultRelInfo->ri_RelationDesc->rd_id, GetCurrentTimestamp());
 
 	
 	i = 0;
