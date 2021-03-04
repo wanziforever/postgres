@@ -1101,12 +1101,15 @@ exec_simple_query(const char *query_string)
 			if (strategy == DISPATCH_PRIMARY || strategy == DISPATCH_PRIMARY_AND_STANDBY) {
 				if (hgdstate->simple_begin_defer) {
 					dispatch("begin;");
+					Dispatch_State.response_avoid_duplicated_consumed+=1;
 					if (!handleResultAndForward())
 						ereport(ERROR, (errmsg("fail to dispatch query %s", query_string)));
 					hgdstate->simple_begin_defer = false;
 				}
 				
 				dispatch(query_string);
+				if (strategy == DISPATCH_PRIMARY_AND_STANDBY)
+					Dispatch_State.response_avoid_duplicated_consumed+=1;
 				if (!handleResultAndForward())
 					ereport(ERROR, (errmsg("fail to dispatch query %s", query_string)));
 			}
