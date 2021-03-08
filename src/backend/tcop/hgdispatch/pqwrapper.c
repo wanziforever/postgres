@@ -415,6 +415,9 @@ hgReadData(PGconn *conn)
 		conn->inStart = conn->inCursor = conn->inEnd = 0;
 	}
 
+  //ereport(LOG, errmsg("readData with inStart(%d), inCursor(%d), inEnd(%d)",
+  //                    conn->inStart, conn->inCursor, conn->inEnd));
+
 	/*
 	 * If the buffer is fairly full, enlarge it. We need to be able to enlarge
 	 * the buffer in case a single message exceeds the initial buffer size. We

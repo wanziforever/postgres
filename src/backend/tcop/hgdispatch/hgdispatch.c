@@ -12,6 +12,8 @@ extern DMLQueryStragegy execution_strategy_choice;
 DispatchState Dispatch_State;
 DispatchState *hgdstate = &Dispatch_State;
 
+bool handleResultInternal(void);
+
 #define BUFFER_LEN 4096
 #define offsetof(type, field) ((unsigned long)&(((type *)0)->field))
 #define IOBUF_SIZE (offsetof(IOBuf, buf) + BUFFER_LEN)
@@ -87,11 +89,25 @@ bool dispatch(const char* query_string) {
 	return true;
 }
 
+
 bool handleResultAndForward(void) {
+  // to comply with the original design of getResult loop call, the asyncStatus
+  // check will break when it is set to ready, and set to idle the next loop
+  // there is a case that when the buffer is almost full, and just can accept
+  // the C message, not the Z message, we need to new loop to handle the Z
+  // message again.
+  do {
+    if (handleResultInternal() == true)
+       return true;
+  } while (1);
+  return false;
+}
+
+
+bool handleResultInternal(void) {
 	PGconn *conn = Dispatch_State.conn;
 	int msghandled = 0;
 	bool consume_message_only = false;
-	;
 	msghandled = dispatchInputParseAndSend(conn, &hgdstate->response_avoid_duplicated_consumed);
 
 
@@ -125,8 +141,11 @@ bool handleResultAndForward(void) {
 		break;
 	case PGASYNC_READY:
 		// try to get the Z command
-		dispatchInputParseAndSend(conn, &hgdstate->response_avoid_duplicated_consumed);
-		break;
+		//dispatchInputParseAndSend(conn, &hgdstate->response_avoid_duplicated_consumed);
+    conn->asyncStatus = PGASYNC_BUSY;
+    // set the status to busy and return false to let the parsing proceed at
+    // up level call, this design is to comply with the original PQgetResult()
+		return false;
 	default:
 		ereport(ERROR,
 				(errmsg("unexpect async status %d", conn->asyncStatus)));
@@ -184,7 +203,7 @@ int dispatchInputParseAndSend(PGconn *conn, int* ignore_msg_num) {
 		avail = conn->inEnd - conn->inCursor;
 		if (avail < msgLength)
 		{
-			/*
+      /*
 			 * Before returning, enlarge the input buffer if needed to hold
 			 * the whole message.  This is better than leaving it to
 			 * pqReadData because we can avoid multiple cycles of realloc()
@@ -203,7 +222,6 @@ int dispatchInputParseAndSend(PGconn *conn, int* ignore_msg_num) {
 				 */
 				handleHgSyncloss(conn, id, msgLength);
 			}
-			ereport(LOG, (errmsg("fail for avail")));
 			return msghandled;
 		}
 		
